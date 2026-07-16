@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+*.tsbuildinfo
+uploads/
+pgdata/
+redis_data/
+.env.example

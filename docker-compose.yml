@@ -1,0 +1,86 @@
+services:
+    postgres:
+        image: postgres:16-alpine
+        restart: unless-stopped
+        environment:
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: prisma
+            POSTGRES_DB: contas
+        volumes:
+            - pgdata:/var/lib/postgresql/data
+        ports:
+            - "5555:5432"
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U postgres"]
+            interval: 5s
+            timeout: 3s
+            retries: 5
+
+    redis:
+        image: redis:7-alpine
+        restart: unless-stopped
+        ports:
+            - "6380:6379"
+        volumes:
+            - redis_data:/data
+
+    api:
+        build:
+            context: ./backend
+            dockerfile: Dockerfile
+        restart: unless-stopped
+        env_file:
+            - ./backend/.env
+        environment:
+            DATABASE_URL: postgresql://postgres:prisma@postgres:5432/contas?schema=public
+            API_URL: http://api:3001
+            EVOLUTION_API_URL: http://evolution-api:8080
+        ports:
+            - "3001:3001"
+        depends_on:
+            postgres:
+                condition: service_healthy
+            evolution-api:
+                condition: service_started
+        volumes:
+            - uploads:/app/uploads
+
+    web:
+        build:
+            context: ./frontend
+            dockerfile: Dockerfile
+        restart: unless-stopped
+        ports:
+            - "3000:3000"
+        depends_on:
+            - api
+
+    evolution-api:
+        image: evoapicloud/evolution-api:latest
+        container_name: contas-evolution-api
+        restart: unless-stopped
+        ports:
+            - "8082:8080"
+        environment:
+            SERVER_URL: http://localhost:8080
+            DATABASE_PROVIDER: postgresql
+            DATABASE_CONNECTION_URI: postgresql://postgres:prisma@postgres:5432/contas?schema=evolution_api
+            CACHE_REDIS_ENABLED: "true"
+            CACHE_REDIS_URI: redis://redis:6379/6
+            AUTHENTICATION_API_KEY: secret_api_key
+            LOG_LEVEL: ERROR,WARN,INFO
+            LOG_BAILEYS: error
+            WA_BUSINESS_TOKEN_WEBHOOK: secret_api_key
+            WEBHOOK_GLOBAL_ENABLED: "true"
+            WEBHOOK_GLOBAL_URL: http://api:3001/webhook/evolution
+            WEBHOOK_GLOBAL_EVENTS: "MESSAGES_UPSERT"
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_started
+
+volumes:
+    pgdata:
+    redis_data:
+    uploads:

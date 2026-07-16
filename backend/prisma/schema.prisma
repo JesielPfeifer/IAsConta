@@ -1,0 +1,133 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String    @id @default(uuid())
+  email     String    @unique
+  password  String
+  name      String
+  salary    Float?
+  partnerId String?   @unique
+  partner   User?     @relation("Couple", fields: [partnerId], references: [id])
+  spouse    User?     @relation("Couple")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  settings          UserSettings?
+  transactions    Transaction[]
+  categories      Category[]
+  bills           Bill[]
+  budgets         Budget[]
+  bankConnections BankConnection[]
+}
+
+model Transaction {
+  id          String          @id @default(uuid())
+  amount      Float
+  type        TransactionType
+  description String
+  categoryId  String?
+  category    Category?       @relation(fields: [categoryId], references: [id])
+  date        DateTime
+  person      Person?
+  isShared    Boolean         @default(false)
+  source             Source          @default(MANUAL)
+  paymentMethod      String?
+  totalInstallments  Int             @default(1)
+  currentInstallment Int             @default(1)
+  isFixed            Boolean         @default(false)
+  userId      String
+  user        User            @relation(fields: [userId], references: [id])
+  createdAt   DateTime        @default(now())
+}
+
+model Category {
+  id         String   @id @default(uuid())
+  name       String
+  icon       String?
+  isDefault  Boolean  @default(false)
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+
+  transactions Transaction[]
+  budgets      Budget[]
+  bills        Bill[]
+}
+
+model Bill {
+  id                String    @id @default(uuid())
+  name              String
+  amount            Float
+  dueDate           DateTime
+  isRecurring       Boolean   @default(false)
+  isShared          Boolean   @default(false)
+  isPaid            Boolean   @default(false)
+  person            Person?
+  categoryId        String?
+  category          Category? @relation(fields: [categoryId], references: [id])
+  totalInstallments Int       @default(1)
+  currentInstallment Int      @default(1)
+  userId            String
+  user              User      @relation(fields: [userId], references: [id])
+  createdAt         DateTime  @default(now())
+}
+
+model Budget {
+  id         String   @id @default(uuid())
+  month      String
+  amount     Float
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+}
+
+model UserSettings {
+  id         String   @id @default(uuid())
+  userId     String   @unique
+  user       User     @relation(fields: [userId], references: [id])
+  groqApiKey String?
+  wifeName   String?
+  husbandName String?
+  whatsappGroupId String?
+  whatsappGroupName String?
+  botApiKey  String?
+  evolutionApiKey String?
+  evolutionApiUrl String?
+  discordToken String?
+  telegramToken String?
+  geminiApiKey String?
+  updatedAt  DateTime @updatedAt
+}
+
+model BankConnection {
+  id        String   @id @default(uuid())
+  bankName  String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+enum TransactionType {
+  EXPENSE
+  INCOME
+}
+
+enum Person {
+  HUSBAND
+  WIFE
+  COUPLE
+}
+
+enum Source {
+  MANUAL
+  BOT
+  NUBANK_CSV
+  CAIXA_PDF
+}
