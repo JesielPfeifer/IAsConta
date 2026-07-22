@@ -15,6 +15,8 @@ services:
             interval: 5s
             timeout: 3s
             retries: 5
+        networks:
+            - easypanel
 
     redis:
         image: redis:7-alpine
@@ -23,8 +25,11 @@ services:
             - "6380:6379"
         volumes:
             - redis_data:/data
+        networks:
+            - easypanel
 
     api:
+        container_name: iasconta-api
         build:
             context: ./backend
             dockerfile: Dockerfile
@@ -35,6 +40,7 @@ services:
             DATABASE_URL: postgresql://postgres:prisma@postgres:5432/contas?schema=public
             API_URL: http://api:3001
             EVOLUTION_API_URL: http://evolution-api:8080
+            # BOT_DEFAULT_EMAIL: defina no backend/.env
         ports:
             - "3001:3001"
         depends_on:
@@ -44,16 +50,30 @@ services:
                 condition: service_started
         volumes:
             - uploads:/app/uploads
+        networks:
+            - easypanel
+        # API is reached through the web nginx proxy (no direct Traefik routing needed)
 
     web:
+        container_name: iasconta-web
         build:
             context: ./frontend
             dockerfile: Dockerfile
         restart: unless-stopped
         ports:
-            - "3000:3000"
+            - "3002:3000"
         depends_on:
             - api
+        networks:
+            - easypanel
+        labels:
+            - "traefik.enable=true"
+            - "traefik.http.routers.iasconta-web.rule=Host(`duda`) || Host(`192.168.100.240`)"
+            - "traefik.http.routers.iasconta-web.priority=100"
+            - "traefik.http.routers.iasconta-web.entrypoints=http,https"
+            - "traefik.http.routers.iasconta-web.tls=true"
+            - "traefik.http.routers.iasconta-web.tls.certresolver=letsencrypt"
+            - "traefik.http.services.iasconta-web.loadbalancer.server.port=3000"
 
     evolution-api:
         image: evoapicloud/evolution-api:latest
@@ -79,6 +99,12 @@ services:
                 condition: service_healthy
             redis:
                 condition: service_started
+        networks:
+            - easypanel
+
+networks:
+    easypanel:
+        external: true
 
 volumes:
     pgdata:
