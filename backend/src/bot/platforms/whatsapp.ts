@@ -4,9 +4,14 @@ const INSTANCE_NAME = process.env.WHATSAPP_INSTANCE_NAME || 'contas';
 const prismaSettings = new PrismaClient();
 
 async function getBotUserId(): Promise<string> {
-  const email = process.env.BOT_DEFAULT_EMAIL || '';
-  if (!email) return '';
-  const u = await prismaSettings.user.findUnique({ where: { email } });
+  // Find first user with a linked WhatsApp phone
+  const wa = await prismaSettings.whatsAppUser.findFirst({
+    where: { isActive: true },
+  });
+  if (wa) return wa.userId;
+  
+  // Fallback: first user
+  const u = await prismaSettings.user.findFirst({ orderBy: { createdAt: 'asc' } });
   return u?.id || '';
 }
 
@@ -37,6 +42,9 @@ export async function startWhatsApp(): Promise<void> {
   console.log('[whatsapp] Evolution API client ready');
   console.log(`[whatsapp] API URL: ${apiUrl}`);
   console.log(`[whatsapp] Instance: ${INSTANCE_NAME}`);
+  
+  // Pre-fetch group cache in background
+  refreshGroupCache().catch(() => {});
 }
 
 export async function getQRCode(): Promise<{ base64: string | null; connected: boolean }> {
@@ -138,12 +146,47 @@ export async function disconnectInstance(): Promise<boolean> {
   }
 }
 
+// Cache for group list — refreshed on startup and every 10 minutes
+let groupCache: { groups: any[]; timestamp: number } | null = null;
+const GROUP_CACHE_TTL = 600_000; // 10 minutes
+
+// Pre-fetch groups on startup
+async function refreshGroupCache(): Promise<void> {
+  try {
+    const url = await getEvoApiUrl();
+    const h = await headers();
+    const res = await fetch(`${url}/group/fetchAllGroups/${INSTANCE_NAME}?getParticipants=false`, { method: 'GET', headers: h });
+    if (res.ok) {
+      const groups = await res.json();
+      if (Array.isArray(groups)) {
+        groupCache = { groups, timestamp: Date.now() };
+        console.log(`[whatsapp] Group cache loaded: ${groups.length} groups`);
+      }
+    }
+  } catch (err) {
+    console.error('[whatsapp] Failed to refresh group cache:', err);
+  }
+}
+
+// Refresh cache periodically
+setInterval(refreshGroupCache, GROUP_CACHE_TTL);
+
 export async function findGroupByName(groupName: string): Promise<{ id: string; name: string } | null> {
   const url = await getEvoApiUrl();
   const h = await headers();
-  const res = await fetch(`${url}/group/fetchAllGroups/${INSTANCE_NAME}`, { method: 'GET', headers: h });
-  if (!res.ok) return null;
-  const groups = await res.json();
+  
+  // Use cache if available and fresh
+  let groups: any[];
+  if (groupCache && (Date.now() - groupCache.timestamp) < GROUP_CACHE_TTL) {
+    groups = groupCache.groups;
+  } else {
+    const res = await fetch(`${url}/group/fetchAllGroups/${INSTANCE_NAME}?getParticipants=false`, { method: 'GET', headers: h });
+    if (!res.ok) return null;
+    groups = await res.json();
+    if (Array.isArray(groups)) {
+      groupCache = { groups, timestamp: Date.now() };
+    }
+  }
   const found = Array.isArray(groups) ? groups.find((g: any) =>
     g.subject?.toLowerCase().includes(groupName.toLowerCase()) ||
     g.name?.toLowerCase().includes(groupName.toLowerCase())

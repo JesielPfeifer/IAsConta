@@ -170,14 +170,23 @@ export default function TransactionForm({ transaction, onSave, onClose }: Props)
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-400 mb-1">Pagamento</label>
-                  <select value={form.paymentMethod} onChange={(e) => updateField('paymentMethod', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50">
-                    <option value="">Selecione...</option>
-                    <option value="DEBITO">Debito</option>
-                    <option value="CAIXA">Caixa</option>
-                    <option value="NUBANK">Nubank</option>
-                    <option value="CREDITO_3">Credito 3</option>
-                    <option value="CREDITO_4">Credito 4</option>
-                  </select>
+                  <input 
+                    list="payment-methods"
+                    value={form.paymentMethod} 
+                    onChange={(e) => updateField('paymentMethod', e.target.value)} 
+                    placeholder="Digite ou selecione..." 
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50" 
+                  />
+                  <datalist id="payment-methods">
+                    <option value="DEBITO" />
+                    <option value="CAIXA" />
+                    <option value="NUBANK" />
+                    <option value="CREDITO_3" />
+                    <option value="CREDITO_4" />
+                    <option value="PIX" />
+                    <option value="DINHEIRO" />
+                    <option value="BOLETO" />
+                  </datalist>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-400 mb-1">Parcelas</label>

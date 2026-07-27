@@ -25,7 +25,16 @@ router.get("/", async (req: Request, res: Response) => {
     const settings = await prisma.userSettings.findUnique({
       where: { userId: req.user!.id },
     });
-    res.json(settings || { userId: req.user!.id });
+    
+    // Normalize: replace null with empty string for all string fields
+    const normalized: Record<string, unknown> = { userId: req.user!.id };
+    if (settings) {
+      for (const [key, value] of Object.entries(settings)) {
+        normalized[key] = value ?? '';
+      }
+    }
+    
+    res.json(normalized);
   } catch (err) {
     console.error("[settings] get error:", err);
     res.status(500).json({ error: "Erro ao buscar configuracoes" });

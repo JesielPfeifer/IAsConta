@@ -24,6 +24,9 @@ model User {
   categories      Category[]
   bills           Bill[]
   budgets         Budget[]
+  goals           Goal[]
+  investments     Investment[]
+  whatsappUsers   WhatsAppUser[]
   bankConnections BankConnection[]
 }
 
@@ -41,6 +44,7 @@ model Transaction {
   paymentMethod      String?
   totalInstallments  Int             @default(1)
   currentInstallment Int             @default(1)
+  installmentGroupId String?
   isFixed            Boolean         @default(false)
   userId      String
   user        User            @relation(fields: [userId], references: [id])
@@ -103,12 +107,54 @@ model UserSettings {
   discordToken String?
   telegramToken String?
   geminiApiKey String?
+  failedLoginAttempts Int    @default(0)
+  lockedUntil         DateTime?
   updatedAt  DateTime @updatedAt
 }
 
 model BankConnection {
   id        String   @id @default(uuid())
   bankName  String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model WhatsAppUser {
+  id        String   @id @default(uuid())
+  phone     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Goal {
+  id          String      @id @default(uuid())
+  name        String
+  totalAmount Float
+  targetDate  DateTime?
+  userId      String
+  user        User        @relation(fields: [userId], references: [id])
+  createdAt   DateTime    @default(now())
+  months      GoalMonth[]
+}
+
+model GoalMonth {
+  id     String @id @default(uuid())
+  goalId String
+  goal   Goal   @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  month  String // "2026-01"
+  amount Float  @default(0)
+}
+
+model Investment {
+  id        String   @id @default(uuid())
+  type      String   // "RESERVA", "RENDA_FIXA", "RENDA_VARIAVEL"
+  amount    Float
+  month     String   // "2026-01"
+  date      DateTime?
   userId    String
   user      User     @relation(fields: [userId], references: [id])
   createdAt DateTime @default(now())

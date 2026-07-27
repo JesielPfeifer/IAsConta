@@ -15,11 +15,16 @@ function getCurrentMonthRange(): { start: Date; end: Date } {
 }
 
 async function getBotUser() {
-  const BOT_DEFAULT_EMAIL = process.env.BOT_DEFAULT_EMAIL || "";
-  if (BOT_DEFAULT_EMAIL) {
-    const user = await prisma.user.findUnique({ where: { email: BOT_DEFAULT_EMAIL } });
+  // Find first user with a linked WhatsApp phone
+  const wa = await prisma.whatsAppUser.findFirst({
+    where: { isActive: true },
+  });
+  if (wa) {
+    const user = await prisma.user.findUnique({ where: { id: wa.userId } });
     if (user) return user;
   }
+  
+  // Fallback: first user
   const first = await prisma.user.findFirst({ orderBy: { createdAt: "asc" } });
   if (!first) throw new Error("No users found");
   return first;
@@ -289,6 +294,27 @@ router.get("/last-7-days", async (req: Request, res: Response) => {
   } catch (err: any) {
     if (err.message) { res.status(400).json({ error: err.message }); return; }
     res.status(500).json({ error: "Internal error" });
+  }
+});
+
+router.get("/upcoming-bills", async (req: Request, res: Response) => {
+  try {
+    const user = await getBotUser();
+    const now = new Date();
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+    const bills = await prisma.bill.findMany({
+      where: {
+        userId: user.id,
+        dueDate: { gte: now, lt: endOfMonth },
+      },
+      orderBy: { dueDate: "asc" },
+    });
+
+    res.json(bills);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Erro interno" });
   }
 });
 

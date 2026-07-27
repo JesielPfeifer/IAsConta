@@ -155,6 +155,14 @@ const botBillSchema = z.object({
   currentInstallment: z.number().int().min(1).optional(),
 });
 
+async function getBotUserId(req: Request): Promise<string> {
+  if (req.body?.userId) return req.body.userId;
+  const wa = await prisma.whatsAppUser.findFirst({ where: { isActive: true } });
+  if (wa) return wa.userId;
+  const first = await prisma.user.findFirst({ orderBy: { createdAt: "asc" } });
+  return first?.id || '';
+}
+
 const botRouter = Router();
 botRouter.use(botAuthMiddleware);
 
@@ -162,18 +170,11 @@ botRouter.post("/", async (req: Request, res: Response) => {
   try {
     const data = botBillSchema.parse(req.body);
 
-    if (!BOT_DEFAULT_EMAIL) {
-      res.status(400).json({ error: "BOT_DEFAULT_EMAIL not configured" });
+    const userId = await getBotUserId(req);
+    if (!userId) {
+      res.status(400).json({ error: "No user found. Link a WhatsApp number first." });
       return;
     }
-
-    const user = await prisma.user.findUnique({ where: { email: BOT_DEFAULT_EMAIL } });
-    if (!user) {
-      res.status(404).json({ error: "Usuário padrão do bot não encontrado. Verifique BOT_DEFAULT_EMAIL no .env" });
-      return;
-    }
-
-    const userId = user.id;
 
     const dueDate = data.dueDate
       ? new Date(data.dueDate)

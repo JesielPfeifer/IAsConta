@@ -5,8 +5,11 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Transactions from './pages/Transactions';
 import Bills from './pages/Bills';
+import Goals from './pages/Goals';
+import Investments from './pages/Investments';
 import Salary from './pages/Salary';
 import Setup from './pages/Setup';
+import Annual from './pages/Annual';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -36,8 +39,11 @@ export default function App() {
         <Route index element={<Dashboard />} />
         <Route path="transactions" element={<Transactions />} />
         <Route path="bills" element={<Bills />} />
+        <Route path="goals" element={<Goals />} />
+        <Route path="investments" element={<Investments />} />
         <Route path="salary" element={<Salary />} />
         <Route path="setup" element={<Setup />} />
+        <Route path="annual" element={<Annual />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
