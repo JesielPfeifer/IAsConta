@@ -53,6 +53,8 @@ export default function Settings() {
       setForm((prev) => ({ ...prev, [name]: e.target.value }));
   }
 
+  const safeVal = (val: string | null | undefined) => val || '';
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError('');
@@ -103,25 +105,25 @@ export default function Settings() {
           <SectionHeader icon={MessageCircle} title="WhatsApp" />
           <Field
             label="Evolution API Key"
-            value={form.evolutionApiKey}
+            value={safeVal(form.evolutionApiKey)}
             onChange={set('evolutionApiKey')}
             placeholder="evolution-api-key"
           />
           <Field
             label="Evolution API URL"
-            value={form.evolutionApiUrl}
+            value={safeVal(form.evolutionApiUrl)}
             onChange={set('evolutionApiUrl')}
             placeholder="https://api.example.com"
           />
           <Field
             label="WhatsApp Group ID"
-            value={form.whatsappGroupId}
+            value={safeVal(form.whatsappGroupId)}
             onChange={set('whatsappGroupId')}
             placeholder="120363XXX@g.us"
           />
           <Field
             label="Bot API Key"
-            value={form.botApiKey}
+            value={safeVal(form.botApiKey)}
             onChange={set('botApiKey')}
             placeholder="bot-api-key"
           />
@@ -131,13 +133,13 @@ export default function Settings() {
           <SectionHeader icon={Users} title="Integrantes" />
           <Field
             label="Nome do Marido"
-            value={form.husbandName}
+            value={safeVal(form.husbandName)}
             onChange={set('husbandName')}
             placeholder="Nome do marido"
           />
           <Field
             label="Nome da Esposa"
-            value={form.wifeName}
+            value={safeVal(form.wifeName)}
             onChange={set('wifeName')}
             placeholder="Nome da esposa"
           />
@@ -147,14 +149,14 @@ export default function Settings() {
           <SectionHeader icon={Bot} title="IA / NLP" />
           <Field
             label="Groq API Key"
-            value={form.groqApiKey}
+            value={safeVal(form.groqApiKey)}
             onChange={set('groqApiKey')}
             type="password"
             placeholder="gsk_xxx..."
           />
           <Field
             label="Gemini API Key"
-            value={form.geminiApiKey}
+            value={safeVal(form.geminiApiKey)}
             onChange={set('geminiApiKey')}
             type="password"
             placeholder="AIza..."
@@ -165,14 +167,14 @@ export default function Settings() {
           <SectionHeader icon={MessageCircle} title="Outros Canais" />
           <Field
             label="Discord Token"
-            value={form.discordToken}
+            value={safeVal(form.discordToken)}
             onChange={set('discordToken')}
             type="password"
             placeholder="Discord bot token"
           />
           <Field
             label="Telegram Token"
-            value={form.telegramToken}
+            value={safeVal(form.telegramToken)}
             onChange={set('telegramToken')}
             type="password"
             placeholder="Telegram bot token"
