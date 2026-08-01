@@ -147,6 +147,8 @@ model GoalMonth {
   goal   Goal   @relation(fields: [goalId], references: [id], onDelete: Cascade)
   month  String // "2026-01"
   amount Float  @default(0)
+
+  @@unique([goalId, month])
 }
 
 model Investment {

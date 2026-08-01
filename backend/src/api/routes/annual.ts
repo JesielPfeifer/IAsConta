@@ -10,8 +10,13 @@ router.use(authMiddleware);
 router.get("/", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
-    const yearParam = req.query.year as string;
-    const year = yearParam ? parseInt(yearParam, 10) : new Date().getFullYear();
+    const yearParam = req.query.year;
+    const parsedYear = typeof yearParam === "string" ? parseInt(yearParam, 10) : NaN;
+    if (yearParam !== undefined && (!Number.isInteger(parsedYear) || parsedYear < 1970 || parsedYear > 9999)) {
+      res.status(400).json({ error: "Ano inválido" });
+      return;
+    }
+    const year = Number.isInteger(parsedYear) ? parsedYear : new Date().getFullYear();
 
     const start = new Date(year, 0, 1);
     const end = new Date(year + 1, 0, 1);

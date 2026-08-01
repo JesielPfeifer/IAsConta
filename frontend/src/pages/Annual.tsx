@@ -50,9 +50,9 @@ export default function Annual() {
         <div className="absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent" />
         <div className="relative flex items-center justify-between gap-4">
           <div className="flex flex-col gap-1">
-            <p className="text-sm font-medium text-emerald-400/80">Visao anual</p>
+            <p className="text-sm font-medium text-emerald-400/80">Visão anual</p>
             <h1 className="text-3xl font-bold tracking-tight text-white">Panorama Anual</h1>
-            <p className="text-sm text-gray-400">Receitas, despesas e saldo mes a mes</p>
+            <p className="text-sm text-gray-400">Receitas, despesas e saldo mês a mês</p>
           </div>
           <div className="flex items-center gap-2">
             <Calendar className="h-5 w-5 text-emerald-400" />
@@ -120,7 +120,7 @@ export default function Annual() {
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent" />
           <div className="relative flex items-start justify-between">
             <div className="space-y-2">
-              <p className="text-sm font-medium text-gray-400">Media Mensal</p>
+              <p className="text-sm font-medium text-gray-400">Média Mensal</p>
               <p className="text-3xl font-bold tracking-tight text-amber-400">
                 {formatCurrency(avg.income)}
               </p>
@@ -140,7 +140,7 @@ export default function Annual() {
             <BarChart3 className="h-5 w-5 text-emerald-400" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-white">Receitas vs Despesas por Mes</h2>
+            <h2 className="text-lg font-semibold text-white">Receitas vs Despesas por Mês</h2>
             <p className="text-xs text-gray-500">Comparativo mensal de {year}</p>
           </div>
         </div>
@@ -180,7 +180,7 @@ export default function Annual() {
         ) : (
           <div className="flex flex-col items-center justify-center gap-3 py-16">
             <BarChart3 className="h-8 w-8 text-gray-700" />
-            <p className="text-sm text-gray-500">Nenhum dado disponivel para {year}</p>
+            <p className="text-sm text-gray-500">Nenhum dado disponível para {year}</p>
           </div>
         )}
       </div>
@@ -197,7 +197,7 @@ export default function Annual() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs uppercase tracking-wider text-gray-500">
-                  <th className="pb-4 font-medium">Mes</th>
+                  <th className="pb-4 font-medium">Mês</th>
                   <th className="pb-4 text-right font-medium">Receitas</th>
                   <th className="pb-4 text-right font-medium">Despesas</th>
                   <th className="pb-4 text-right font-medium">Saldo</th>
@@ -259,7 +259,7 @@ export default function Annual() {
         ) : (
           <div className="flex flex-col items-center justify-center gap-3 py-16">
             <BarChart3 className="h-8 w-8 text-gray-700" />
-            <p className="text-sm text-gray-500">Nenhum dado disponivel para {year}</p>
+            <p className="text-sm text-gray-500">Nenhum dado disponível para {year}</p>
           </div>
         )}
       </div>

@@ -10,14 +10,14 @@ const createInvestmentSchema = z.object({
   type: z.enum(["RESERVA", "RENDA_FIXA", "RENDA_VARIAVEL"]),
   amount: z.number().positive(),
   month: z.string().regex(/^\d{4}-\d{2}$/, "Formato: YYYY-MM"),
-  date: z.string().datetime().optional(),
+  date: z.string().optional(),
 });
 
 const updateInvestmentSchema = z.object({
   type: z.enum(["RESERVA", "RENDA_FIXA", "RENDA_VARIAVEL"]).optional(),
   amount: z.number().positive().optional(),
   month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
-  date: z.string().datetime().nullable().optional(),
+  date: z.string().nullable().optional(),
 });
 
 router.use(authMiddleware);

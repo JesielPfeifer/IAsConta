@@ -104,40 +104,22 @@ export async function checkAccountLock(email: string): Promise<{
 }
 
 export async function recordFailedAttempt(email: string): Promise<boolean> {
-  const user = await prisma.user.findUnique({
-    where: { email },
-    include: { settings: true },
-  });
+  const user = await prisma.user.findUnique({ where: { email } });
   if (!user) return false;
 
-  const attempts = (user.settings?.failedLoginAttempts || 0) + 1;
-
-  if (attempts >= MAX_ATTEMPTS) {
-    await prisma.userSettings.upsert({
-      where: { userId: user.id },
-      create: {
-        userId: user.id,
-        failedLoginAttempts: attempts,
-        lockedUntil: new Date(Date.now() + LOCK_DURATION_MS),
-      },
-      update: {
-        failedLoginAttempts: attempts,
-        lockedUntil: new Date(Date.now() + LOCK_DURATION_MS),
-      },
-    });
-    return true; // locked
-  }
-
-  await prisma.userSettings.upsert({
+  const updated = await prisma.userSettings.upsert({
     where: { userId: user.id },
-    create: {
-      userId: user.id,
-      failedLoginAttempts: attempts,
-    },
-    update: {
-      failedLoginAttempts: attempts,
-    },
+    create: { userId: user.id, failedLoginAttempts: 1 },
+    update: { failedLoginAttempts: { increment: 1 } },
   });
+
+  if (updated.failedLoginAttempts >= MAX_ATTEMPTS) {
+    await prisma.userSettings.update({
+      where: { userId: user.id },
+      data: { lockedUntil: new Date(Date.now() + LOCK_DURATION_MS) },
+    });
+    return true;
+  }
 
   return false;
 }

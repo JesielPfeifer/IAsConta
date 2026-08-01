@@ -113,7 +113,7 @@ export default function Investments() {
           <div className="flex flex-col gap-1">
             <p className="text-sm font-medium text-emerald-400/80">Carteira</p>
             <h1 className="text-3xl font-bold tracking-tight text-white">Investimentos</h1>
-            <p className="text-sm text-gray-400">Reserva, renda fixa e renda variavel</p>
+            <p className="text-sm text-gray-400">Reserva, renda fixa e renda variável</p>
           </div>
           <button
             onClick={() => setShowModal(true)}
@@ -171,7 +171,7 @@ export default function Investments() {
         </div>
         {byMonth.length === 0 ? (
           <div className="p-10 text-center text-gray-500 text-sm">
-            Nenhum aporte registrado. Clique em "Novo Aporte" para comecar.
+            Nenhum aporte registrado. Clique em "Novo Aporte" para começar.
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -259,11 +259,11 @@ export default function Investments() {
 
       {/* New Investment Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="new-investment-title" onKeyDown={(e) => { if (e.key === 'Escape') setShowModal(false); }}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowModal(false)} />
           <div className="relative bg-gray-900 border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl shadow-black/50">
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+              <h2 id="new-investment-title" className="text-lg font-semibold text-white flex items-center gap-2">
                 <TrendingUp className="w-5 h-5 text-emerald-400" />
                 Novo Aporte
               </h2>
@@ -301,7 +301,7 @@ export default function Investments() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1.5">Mes de referencia</label>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Mês de referência</label>
                 <input
                   type="month"
                   value={form.month}
