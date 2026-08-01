@@ -123,7 +123,7 @@ app.post("/webhook/evolution", async (req, res) => {
 
     const text = rawText.replace(/@contas/gi, "").trim();
 
-    // Identify user: resolve by instanceName from the webhook payload
+    // Identify user by instance name from webhook
     const prisma = new PrismaClient();
     let botUserId = '';
     
