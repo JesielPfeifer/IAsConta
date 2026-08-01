@@ -28,11 +28,12 @@ import { parseCaixaPDF } from "./parsers/caixa-pdf.js";
 import { callApi } from "./bot/client.js";
 
 const app = express();
+app.set("trust proxy", 1);
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 app.use(cors(corsOptions()));
-app.use(express.json({ limit: "50mb" }));
+app.use(express.json({ limit: "1mb" }));
 
 // Rate limit: auth routes only
 app.use("/api/auth", rateLimitMiddleware);
@@ -87,10 +88,15 @@ app.post("/api/parse/caixa", upload.single("file"), async (req, res) => {
 
 app.post("/webhook/evolution", async (req, res) => {
   try {
-    // Validate webhook secret
+    // Validate webhook secret — fail if not configured
     const webhookSecret = req.headers["x-webhook-secret"] as string;
-    const expectedSecret = process.env.WEBHOOK_SECRET || "";
-    if (expectedSecret && webhookSecret !== expectedSecret) {
+    const expectedSecret = process.env.WEBHOOK_SECRET;
+    if (!expectedSecret) {
+      console.error("[webhook] FATAL: WEBHOOK_SECRET not configured");
+      res.status(500).json({ error: "Server misconfiguration" });
+      return;
+    }
+    if (webhookSecret !== expectedSecret) {
       console.warn("[webhook] Invalid webhook secret, rejecting");
       res.status(401).json({ error: "Unauthorized" });
       return;
@@ -121,26 +127,20 @@ app.post("/webhook/evolution", async (req, res) => {
     const prisma = new PrismaClient();
     let botUserId = '';
     
-    // Try to find WhatsAppUser by instance name
-    const waUser = await prisma.whatsAppUser.findFirst({
-      where: { instanceName, isActive: true },
-    });
-    if (waUser) {
-      botUserId = waUser.userId;
-    } else {
-      // Fallback: first active WhatsAppUser (backward compat for default instance)
-      const fallback = await prisma.whatsAppUser.findFirst({
-        where: { isActive: true },
-        orderBy: { createdAt: "asc" },
+    try {
+      const waUser = await prisma.whatsAppUser.findFirst({
+        where: { instanceName, isActive: true },
       });
-      if (fallback) {
-        botUserId = fallback.userId;
+      if (waUser) {
+        botUserId = waUser.userId;
       }
-    }
-    
-    if (!botUserId) {
-      res.sendStatus(200);
-      return;
+      
+      if (!botUserId) {
+        res.sendStatus(200);
+        return;
+      }
+    } finally {
+      await prisma.$disconnect();
     }
     const { getSetting } = await import('./api/services/settings.js');
     const allowedGroup = await getSetting(botUserId, 'whatsappGroupId', process.env.WHATSAPP_GROUP_ID || '');
