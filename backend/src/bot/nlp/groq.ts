@@ -90,16 +90,21 @@ function normalizeParsed(raw: any): ParsedTransaction {
   };
 }
 
-export async function parseWithGroq(text: string): Promise<ParsedTransaction | null> {
+export async function parseWithGroq(text: string, userId?: string): Promise<ParsedTransaction | null> {
   const prisma = new PrismaClient();
-  const botEmail = process.env.BOT_DEFAULT_EMAIL || '';
-  let userId = '';
-  if (botEmail) {
-    const u = await prisma.user.findUnique({ where: { email: botEmail } });
-    if (u) userId = u.id;
+  let apiKey = process.env.GROQ_API_KEY || '';
+  
+  if (userId) {
+    const { getSetting } = await import('../../api/services/settings.js');
+    const key = await getSetting(userId, 'groqApiKey', process.env.GROQ_API_KEY);
+    if (key) apiKey = key;
+  } else {
+    // Fallback: find any user with groq key configured
+    const settings = await prisma.userSettings.findFirst({
+      where: { groqApiKey: { not: null } },
+    });
+    if (settings?.groqApiKey) apiKey = settings.groqApiKey;
   }
-  const { getSetting } = await import('../../api/services/settings.js');
-  const apiKey = await getSetting(userId, 'groqApiKey', process.env.GROQ_API_KEY);
 
   if (!apiKey) {
     console.warn('[nlp] GROQ_API_KEY not set, skipping Groq parse');
@@ -137,18 +142,13 @@ export async function parseWithGroq(text: string): Promise<ParsedTransaction | n
   }
 }
 
-export async function chatWithGroq(question: string, context: string): Promise<string | null> {
-  const botEmail = process.env.BOT_DEFAULT_EMAIL || '';
+export async function chatWithGroq(question: string, context: string, userId?: string): Promise<string | null> {
   let apiKey = process.env.GROQ_API_KEY || '';
 
-  if (botEmail) {
+  if (userId) {
     const prisma = new PrismaClient();
-    const u = await prisma.user.findUnique({ where: { email: botEmail } });
-    if (u) {
-      const { getSetting } = await import('../../api/services/settings.js');
-      const key = await getSetting(u.id, 'groqApiKey', process.env.GROQ_API_KEY);
-      if (key) apiKey = key;
-    }
+    const settings = await prisma.userSettings.findUnique({ where: { userId } });
+    if (settings?.groqApiKey) apiKey = settings.groqApiKey;
   }
 
   if (!apiKey) return null;

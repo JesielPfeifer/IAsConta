@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IAsConta — e as conta? 🤖💸</title>
+<style>
+:root {
+  --green: #00C853;
+  --green-dark: #009624;
+  --bg: #0a0a0a;
+  --card: #111;
+  --text: #e0e0e0;
+  --muted: #888;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; line-height:1.6; }
+.container { max-width:1100px; margin:0 auto; padding:0 24px; }
+
+.hero {
+  text-align:center; padding:100px 24px 60px;
+  background:radial-gradient(ellipse at 50% 0%, rgba(0,200,83,0.12) 0%, transparent 60%);
+}
+.hero .tag { display:inline-block; background:rgba(0,200,83,0.15); color:var(--green); padding:6px 16px; border-radius:20px; font-size:13px; font-weight:500; margin-bottom:20px; }
+.hero h1 { font-size:clamp(2.5rem,6vw,4.5rem); font-weight:800; line-height:1.05; margin-bottom:16px; }
+.hero h1 .ia { background:linear-gradient(135deg, var(--green), #69F0AE); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+.hero h1 .conta { color:#fff; }
+.hero .punchline { font-size:1.3rem; color:var(--muted); margin-bottom:12px; font-style:italic; }
+.hero .sub { font-size:1.1rem; color:var(--muted); max-width:600px; margin:0 auto 32px; }
+.hero .btn { display:inline-block; background:var(--green); color:#000; padding:14px 40px; border-radius:12px; font-weight:700; font-size:1.1rem; text-decoration:none; transition:.2s; }
+.hero .btn:hover { background:#00E676; transform:translateY(-2px); box-shadow:0 8px 30px rgba(0,200,83,0.3); }
+
+section { padding:80px 0; }
+section h2 { font-size:2rem; font-weight:700; margin-bottom:12px; }
+section h2 .hl { color:var(--green); }
+section .desc { color:var(--muted); max-width:600px; margin-bottom:32px; font-size:1.05rem; }
+
+.features { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr)); gap:20px; }
+.card { background:var(--card); border:1px solid #1a1a1a; border-radius:16px; padding:28px; transition:.2s; }
+.card:hover { border-color:#2a2a2a; transform:translateY(-2px); }
+.card .icon { font-size:2rem; margin-bottom:12px; }
+.card h3 { font-size:1.1rem; margin-bottom:8px; color:#fff; }
+.card p { color:var(--muted); font-size:0.95rem; }
+
+.two-col { display:grid; grid-template-columns:1fr 1fr; gap:40px; align-items:center; }
+@media(max-width:768px) { .two-col { grid-template-columns:1fr; } }
+
+.pipeline { background:var(--card); border-radius:16px; padding:32px; border:1px solid #1a1a1a; }
+.pipeline-row { display:flex; align-items:center; gap:12px; padding:10px 0; flex-wrap:wrap; }
+.pipeline-step { background:#1a1a1a; padding:10px 18px; border-radius:10px; font-size:0.9rem; white-space:nowrap; }
+.pipeline-arrow { color:var(--green); font-weight:700; }
+.pipeline-result { background:rgba(0,200,83,0.1); border:1px solid rgba(0,200,83,0.3); color:var(--green); }
+
+.bento { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px; }
+.bento-item { background:var(--card); border:1px solid #1a1a1a; border-radius:16px; padding:24px; }
+.bento-item .big-icon { font-size:2.5rem; margin-bottom:8px; }
+.bento-item h4 { font-size:1rem; color:#fff; margin-bottom:4px; }
+.bento-item span { color:var(--muted); font-size:0.85rem; }
+
+footer { text-align:center; padding:40px 24px; color:var(--muted); font-size:0.85rem; border-top:1px solid #1a1a1a; margin-top:40px; }
+footer a { color:var(--green); text-decoration:none; }
+</style>
+</head>
+<body>
+
+<section class="hero">
+  <div class="container">
+    <div class="tag">🚀 IA + Finanças Pessoais</div>
+    <h1><span class="ia">IAs</span><span class="conta">Conta</span></h1>
+    <div class="punchline">"— E as conta?"<br>"— A IA resolve." 💬</div>
+    <p class="sub">O assistente financeiro inteligente que entende suas finanças por WhatsApp, processa faturas automaticamente e conversa com você como ninguém.</p>
+    <a href="/login" class="btn">✨ Começar agora</a>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>Como <span class="hl">funciona</span></h2>
+    <p class="desc">Envie uma mensagem no WhatsApp como se estivesse falando com alguém. A IA entende o que você quer e processa na hora — sem app, sem planilha, sem complicação.</p>
+    <div class="pipeline">
+      <div class="pipeline-row">
+        <div class="pipeline-step">📱 WhatsApp</div>
+        <span class="pipeline-arrow">→</span>
+        <div class="pipeline-step">🧠 IA (Groq/Gemini)</div>
+        <span class="pipeline-arrow">→</span>
+        <div class="pipeline-step">🔍 Regex Inteligente</div>
+        <span class="pipeline-arrow">→</span>
+        <div class="pipeline-step">💾 PostgreSQL</div>
+        <span class="pipeline-arrow">→</span>
+        <div class="pipeline-step pipeline-result">✅ Registrado!</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>Tudo que o <span class="hl">IAsConta</span> faz</h2>
+    <p class="desc">De gastos do dia a dia a relatórios anuais — tudo integrado, automático e inteligente.</p>
+    <div class="features">
+      <div class="card">
+        <div class="icon">💬</div>
+        <h3>WhatsApp Bot Inteligente</h3>
+        <p>Registre transações conversando. "Gastei 50 reais em mercado" e pronto. A IA entende contexto, valores, categorias e até parcelamentos.</p>
+      </div>
+      <div class="card">
+        <div class="icon">📄</div>
+        <h3>Importação de Faturas</h3>
+        <p>Envie o PDF da fatura Caixa ou o CSV do Nubank. A IA extrai cada transação automaticamente — sem digitar nada.</p>
+      </div>
+      <div class="card">
+        <div class="icon">👫</div>
+        <h3>Gestão de Casal</h3>
+        <p>Salários separados, gastos individuais e compartilhados. O sistema calcula quanto cada um gastou, quanto sobrou e o percentual da renda.</p>
+      </div>
+      <div class="card">
+        <div class="icon">📊</div>
+        <h3>Dashboard em Tempo Real</h3>
+        <p>WebSocket com atualização ao vivo. Veja seus gastos entrarem no dashboard no mesmo instante, com gráficos por categoria.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🏷️</div>
+        <h3>Categorização Automática</h3>
+        <p>+100 palavras-chave mapeadas. A IA classifica cada gasto automaticamente: mercado, transporte, saúde, beleza, lazer...</p>
+      </div>
+      <div class="card">
+        <div class="icon">📆</div>
+        <h3>Contas Fixas</h3>
+        <p>Cadastre contas recorrentes: "criar conta fixa FIES 522,00 dia 15". O sistema rastreia vencimentos e projeta o mês.</p>
+      </div>
+      <div class="card">
+        <div class="icon">💳</div>
+        <h3>Métodos de Pagamento</h3>
+        <p>Débito, crédito, Nubank, Caixa — o sistema detecta automaticamente e rastreia por método.</p>
+      </div>
+      <div class="card">
+        <div class="icon">📈</div>
+        <h3>Metas Financeiras</h3>
+        <p>Defina objetivos: "quero juntar R$10.000 para uma viagem". Acompanhe o progresso e receba projeções.</p>
+      </div>
+      <div class="card">
+        <div class="icon">💰</div>
+        <h3>Investimentos</h3>
+        <p>Registre e acompanhe sua carteira de investimentos com rentabilidade e alocação por tipo de ativo.</p>
+      </div>
+      <div class="card">
+        <div class="icon">📅</div>
+        <h3>Relatórios Anuais</h3>
+        <p>Resumo mês a mês do ano inteiro. Veja tendências, compare meses e entenda seus padrões de consumo.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🔐</div>
+        <h3>Segurança de Banco</h3>
+        <p>JWT, bcrypt, rate limiting, middleware de segurança, portas isoladas. Seus dados financeiros protegidos com padrão enterprise.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🔗</div>
+        <h3>Integração Multicanal</h3>
+        <p>WhatsApp, Telegram, Discord. O mesmo bot responde em todos os canais. API aberta para extensões.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>O que você pode <span class="hl">perguntar</span> no WhatsApp</h2>
+    <div class="bento">
+      <div class="bento-item"><div class="big-icon">💰</div><h4>"Salário do casal"</h4><span>Resposta direta do banco, sem IA</span></div>
+      <div class="bento-item"><div class="big-icon">📊</div><h4>"Resumo do mês"</h4><span>Receitas, despesas, saldo e top categorias</span></div>
+      <div class="bento-item"><div class="big-icon">🛒</div><h4>"Gastei 50 em mercado"</h4><span>Regex processa, IA confirma se precisar</span></div>
+      <div class="bento-item"><div class="big-icon">📎</div><h4>Enviar PDF da Caixa</h4><span>IA extrai cada linha da fatura</span></div>
+      <div class="bento-item"><div class="big-icon">📋</div><h4>"Onde posso economizar?"</h4><span>IA analisa padrões e sugere cortes</span></div>
+      <div class="bento-item"><div class="big-icon">🎯</div><h4>"Meta da viagem"</h4><span>Progresso e projeção de conclusão</span></div>
+      <div class="bento-item"><div class="big-icon">👨</div><h4>"Salário do marido"</h4><span>Dados individuais por pessoa</span></div>
+      <div class="bento-item"><div class="big-icon">📈</div><h4>"Relatório anual 2026"</h4><span>Comparativo mês a mês</span></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>Tecnologia de <span class="hl">ponta</span></h2>
+    <p class="desc">Stack moderna, escalável e 100% self-hosted. Seus dados nunca saem do seu servidor.</p>
+    <div class="bento">
+      <div class="bento-item"><h4>🧠 IA</h4><span>Groq (Llama 3.3) + Gemini + Regex inteligente</span></div>
+      <div class="bento-item"><h4>⚛️ Frontend</h4><span>React 18 + TypeScript + Vite + Tailwind</span></div>
+      <div class="bento-item"><h4>🔧 Backend</h4><span>Node.js + Express + Prisma ORM</span></div>
+      <div class="bento-item"><h4>🗄️ Banco</h4><span>PostgreSQL 16 + Redis 7</span></div>
+      <div class="bento-item"><h4>🐳 Infra</h4><span>Docker + Traefik + Cloudflare Tunnel</span></div>
+      <div class="bento-item"><h4>📱 WhatsApp</h4><span>Evolution API + Baileys (WebSocket)</span></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="container" style="text-align:center;">
+    <h2>Pronto pra resolver <span class="hl">as conta</span>?</h2>
+    <p class="desc" style="margin:16px auto 24px;">Escaneie o QR code do WhatsApp e comece a conversar com sua IA financeira. Sem planilha, sem app — só falar.</p>
+    <a href="/login" class="btn">🌐 Acessar IAsConta</a>
+    <p style="margin-top:16px; color:var(--muted); font-size:0.9rem;">Disponível também em: WhatsApp · Telegram · Discord</p>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <p><strong>IAsConta</strong> — "e as conta?" a IA resolve. ✨</p>
+    <p style="margin-top:8px;">Feito com 💚 no Brasil · <a href="https://iasconta.jesielpfeifer.com">iasconta.jesielpfeifer.com</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

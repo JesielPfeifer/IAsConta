@@ -21,6 +21,7 @@ const createTransactionSchema = z.object({
   paymentMethod: z.string().optional().nullable(),
   totalInstallments: z.number().int().optional(),
   currentInstallment: z.number().int().optional(),
+  installmentGroupId: z.string().optional(),
   isFixed: z.boolean().optional(),
 });
 
@@ -50,6 +51,11 @@ const botTransactionSchema = z.object({
   platform: z.string().optional(),
   rawMessage: z.string().optional(),
   senderInfo: z.any().optional(),
+  userId: z.string().optional(),
+  paymentMethod: z.string().optional().nullable(),
+  totalInstallments: z.number().int().optional(),
+  currentInstallment: z.number().int().optional(),
+  installmentGroupId: z.string().optional(),
 });
 
 router.use(authMiddleware);
@@ -139,6 +145,44 @@ router.put("/:id", async (req: Request, res: Response) => {
       include: { category: true },
     });
 
+    // If this is part of an installment series, update siblings too
+    if (existing.totalInstallments > 1) {
+      // Use installmentGroupId if available, fallback to description+date matching
+      const siblingWhere: Record<string, unknown> = {
+        userId: user.id,
+        totalInstallments: existing.totalInstallments,
+        id: { not: id as string },
+      };
+      
+      if (existing.installmentGroupId) {
+        siblingWhere.installmentGroupId = existing.installmentGroupId;
+      } else {
+        // Legacy: match by description + date range, offset by currentInstallment
+        const idx = (existing.currentInstallment ?? 1) - 1;
+        const monthStart = new Date(existing.date.getFullYear(), existing.date.getMonth() - idx, 1);
+        const monthEnd = new Date(existing.date.getFullYear(), existing.date.getMonth() + (existing.totalInstallments - idx), 1);
+        siblingWhere.description = existing.description;
+        siblingWhere.date = { gte: monthStart, lt: monthEnd };
+      }
+      
+      // Propagate changed fields to all siblings
+      const siblingData: Record<string, unknown> = {};
+      if (data.description) siblingData.description = data.description;
+      if (data.amount) siblingData.amount = data.amount;
+      if (data.categoryId !== undefined) siblingData.categoryId = data.categoryId;
+      if (data.person !== undefined) siblingData.person = data.person;
+      if (data.paymentMethod !== undefined) siblingData.paymentMethod = data.paymentMethod;
+      if (data.isShared !== undefined) siblingData.isShared = data.isShared;
+      if (data.type) siblingData.type = data.type;
+      
+      if (Object.keys(siblingData).length > 0) {
+        await prisma.transaction.updateMany({
+          where: siblingWhere as any,
+          data: siblingData as any,
+        });
+      }
+    }
+
     res.json(transaction);
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -164,7 +208,32 @@ router.delete("/:id", async (req: Request, res: Response) => {
       return;
     }
 
-    await prisma.transaction.delete({ where: { id: id as string } });
+    // If part of installment series, delete siblings too
+    if (existing.totalInstallments > 1) {
+      if (existing.installmentGroupId) {
+        await prisma.transaction.deleteMany({
+          where: { userId: user.id, installmentGroupId: existing.installmentGroupId },
+        });
+      } else {
+        const idx = (existing.currentInstallment ?? 1) - 1;
+        const monthStart = new Date(existing.date.getFullYear(), existing.date.getMonth() - idx, 1);
+        const monthEnd = new Date(
+          existing.date.getFullYear(),
+          existing.date.getMonth() + (existing.totalInstallments - idx),
+          1
+        );
+        await prisma.transaction.deleteMany({
+          where: {
+            userId: user.id,
+            totalInstallments: existing.totalInstallments,
+            description: existing.description,
+            date: { gte: monthStart, lt: monthEnd },
+          },
+        });
+      }
+    } else {
+      await prisma.transaction.delete({ where: { id: id as string } });
+    }
 
     res.json({ message: "Transação removida" });
   } catch (err) {
@@ -224,22 +293,36 @@ const BOT_DEFAULT_EMAIL = process.env.BOT_DEFAULT_EMAIL || "";
 const botRouter = Router();
 botRouter.use(botAuthMiddleware);
 
+async function getBotUserId(req: Request): Promise<string> {
+  // Verify userId from body against active WhatsAppUser
+  if (req.body?.userId) {
+    const linked = await prisma.whatsAppUser.findFirst({
+      where: { userId: req.body.userId, isActive: true },
+    });
+    if (linked) return linked.userId;
+  }
+  
+  // Find first user with linked WhatsApp (deterministic ordering)
+  const wa = await prisma.whatsAppUser.findFirst({
+    where: { isActive: true },
+    orderBy: { createdAt: "asc" },
+  });
+  if (wa) return wa.userId;
+  
+  // Fallback: first user
+  const first = await prisma.user.findFirst({ orderBy: { createdAt: "asc" } });
+  return first?.id || '';
+}
+
 botRouter.post("/", async (req: Request, res: Response) => {
   try {
     const data = botTransactionSchema.parse(req.body);
 
-    if (!BOT_DEFAULT_EMAIL) {
-      res.status(400).json({ error: "BOT_DEFAULT_EMAIL not configured" });
+    const userId = await getBotUserId(req);
+    if (!userId) {
+      res.status(400).json({ error: "No user found. Link a WhatsApp number first." });
       return;
     }
-
-    const user = await prisma.user.findUnique({ where: { email: BOT_DEFAULT_EMAIL } });
-    if (!user) {
-      res.status(404).json({ error: "Usuário padrão do bot não encontrado. Verifique BOT_DEFAULT_EMAIL no .env" });
-      return;
-    }
-
-    const userId = user.id;
 
     const type = data.type.toUpperCase() as "EXPENSE" | "INCOME";
 
@@ -278,6 +361,10 @@ botRouter.post("/", async (req: Request, res: Response) => {
         isShared: data.isShared ?? false,
         userId,
         source: "BOT",
+        paymentMethod: data.paymentMethod || null,
+        totalInstallments: data.totalInstallments || 1,
+        currentInstallment: data.currentInstallment || 1,
+        installmentGroupId: data.installmentGroupId || null,
       },
       include: { category: true },
     });
@@ -288,6 +375,42 @@ botRouter.post("/", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
+    console.error(err);
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+// Bot-authenticated PUT for updating transactions (isFixed, installments, etc.)
+botRouter.put("/:id", async (req: Request, res: Response) => {
+  try {
+    const userId = await getBotUserId(req);
+    if (!userId) {
+      res.status(400).json({ error: "No user found" });
+      return;
+    }
+
+    const { id } = req.params;
+    const existing = await prisma.transaction.findFirst({
+      where: { id: id as string, userId },
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Transação não encontrada" });
+      return;
+    }
+
+    const updateData: Record<string, unknown> = {};
+    if (req.body.isFixed !== undefined) updateData.isFixed = req.body.isFixed;
+    if (req.body.totalInstallments !== undefined) updateData.totalInstallments = req.body.totalInstallments;
+    if (req.body.currentInstallment !== undefined) updateData.currentInstallment = req.body.currentInstallment;
+    if (req.body.installmentGroupId !== undefined) updateData.installmentGroupId = req.body.installmentGroupId;
+
+    const transaction = await prisma.transaction.update({
+      where: { id: id as string },
+      data: updateData as any,
+    });
+
+    res.json(transaction);
+  } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
