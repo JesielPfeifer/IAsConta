@@ -48,6 +48,8 @@ export default function Setup() {
       setForm((prev) => ({ ...prev, [name]: e.target.value }));
   }
 
+  const safeTrim = (val: string | null | undefined) => (val || '').trim();
+
   async function handleSave(e: FormEvent) {
     e.preventDefault();
     setSaveMsg('');
@@ -64,7 +66,7 @@ export default function Setup() {
   }
 
   async function findGroup() {
-    const name = form.whatsappGroupName.trim();
+    const name = safeTrim(form.whatsappGroupName);
     if (!name) return;
     setFinding(true);
     setGroupFound('idle');
@@ -197,19 +199,29 @@ export default function Setup() {
             <div className="flex gap-2">
               <input type="text" value={form.whatsappGroupName} onChange={setField('whatsappGroupName')} placeholder="Ex: Contas"
                 className="flex-1 bg-white/[0.03] border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
-              <button type="button" onClick={findGroup} disabled={finding || !form.whatsappGroupName.trim()}
+              <button type="button" onClick={findGroup} disabled={finding || !safeTrim(form.whatsappGroupName)}
                 className="flex items-center gap-1.5 px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-40 text-gray-300 rounded-xl text-sm transition-colors">
                 <Search className="w-4 h-4" />{finding ? '...' : 'Buscar'}
               </button>
             </div>
             {groupFound === 'found' && (
-              <p className="text-xs text-emerald-400 mt-1">Grupo "{foundGroupName}" encontrado! ID configurado.</p>
+              <div className="mt-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                <p className="text-sm text-emerald-400 font-medium">✅ Grupo "{foundGroupName}" encontrado!</p>
+                <p className="text-xs text-emerald-400/60 mt-1">ID: {form.whatsappGroupId}</p>
+                <p className="text-xs text-gray-500 mt-2">⚠️ Role a pagina e clique em <strong>Salvar Configuracoes</strong> para aplicar.</p>
+              </div>
             )}
             {groupFound === 'notfound' && (
-              <p className="text-xs text-red-400 mt-1">Grupo nao encontrado. Verifique o nome ou conecte o WhatsApp primeiro.</p>
+              <div className="mt-3 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
+                <p className="text-sm text-red-400">❌ Grupo nao encontrado</p>
+                <p className="text-xs text-red-400/60 mt-1">Verifique se o WhatsApp esta conectado e o nome esta correto.</p>
+              </div>
             )}
-            {form.whatsappGroupId && (
-              <p className="text-xs text-gray-600 mt-1 truncate">ID: {form.whatsappGroupId}</p>
+            {finding && (
+              <div className="mt-3 flex items-center gap-2 text-gray-400 text-sm">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Buscando grupos...
+              </div>
             )}
           </div>
         </div>

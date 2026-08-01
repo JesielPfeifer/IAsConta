@@ -433,4 +433,60 @@ router.get("/tip", async (req: Request, res: Response) => {
   }
 });
 
+router.get("/credit-card-detail", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    const { start, end } = getMonthRange(req.query.month as string);
+
+    const transactions = await prisma.transaction.findMany({
+      where: {
+        userId: user.id,
+        type: "EXPENSE",
+        date: { gte: start, lt: end },
+        paymentMethod: { in: ["NUBANK", "CAIXA", "CREDITO_3", "CREDITO_4", "CREDITO"] },
+        totalInstallments: { gt: 1 },
+      },
+      include: { category: true },
+      orderBy: { date: "desc" },
+    });
+
+    const result = transactions.map((t) => ({
+      id: t.id,
+      description: t.description,
+      amount: t.amount,
+      date: t.date,
+      categoryName: t.category?.name || null,
+      paymentMethod: t.paymentMethod || "Cartao",
+      totalInstallments: t.totalInstallments,
+      currentInstallment: t.currentInstallment,
+    }));
+
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+router.get("/income-detail", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    const { start, end } = getMonthRange(req.query.month as string);
+
+    const transactions = await prisma.transaction.findMany({
+      where: {
+        userId: user.id,
+        type: "INCOME",
+        date: { gte: start, lt: end },
+      },
+      orderBy: { date: "desc" },
+    });
+
+    res.json(transactions);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
 export default router;
