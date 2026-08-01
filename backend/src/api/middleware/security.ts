@@ -37,17 +37,17 @@ export function rateLimitMiddleware(
   next();
 }
 
-// CORS: restrict to known origins
+// CORS: restrict to known origins (configurable via env)
 export function corsOptions() {
-  const allowedOrigins = [
-    "http://localhost:3000",
-    "http://localhost:3002",
-    "http://localhost:5173",
-    "http://127.0.0.1:3002",
-    "https://iasconta.jesielpfeifer.com",
-    "http://iasconta.jesielpfeifer.com",
-    "https://gtqlcw.easypanel.host",
-  ];
+  const envOrigins = process.env.CORS_ORIGINS || "";
+  const allowedOrigins = envOrigins
+    ? envOrigins.split(",").map(s => s.trim()).filter(Boolean)
+    : [
+        "http://localhost:3000",
+        "http://localhost:3002",
+        "http://localhost:5173",
+        "http://127.0.0.1:3002",
+      ];
 
   return {
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
