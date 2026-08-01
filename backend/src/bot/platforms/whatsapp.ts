@@ -7,6 +7,7 @@ async function getBotUserId(): Promise<string> {
   // Find first user with a linked WhatsApp phone
   const wa = await prismaSettings.whatsAppUser.findFirst({
     where: { isActive: true },
+    orderBy: { createdAt: 'asc' },
   });
   if (wa) return wa.userId;
   

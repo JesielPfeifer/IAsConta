@@ -156,8 +156,16 @@ const botBillSchema = z.object({
 });
 
 async function getBotUserId(req: Request): Promise<string> {
-  if (req.body?.userId) return req.body.userId;
-  const wa = await prisma.whatsAppUser.findFirst({ where: { isActive: true } });
+  if (req.body?.userId) {
+    const linked = await prisma.whatsAppUser.findFirst({
+      where: { userId: req.body.userId, isActive: true },
+    });
+    if (linked) return linked.userId;
+  }
+  const wa = await prisma.whatsAppUser.findFirst({
+    where: { isActive: true },
+    orderBy: { createdAt: "asc" },
+  });
   if (wa) return wa.userId;
   const first = await prisma.user.findFirst({ orderBy: { createdAt: "asc" } });
   return first?.id || '';

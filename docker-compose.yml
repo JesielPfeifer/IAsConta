@@ -37,12 +37,12 @@ services:
         env_file:
             - ./backend/.env
         environment:
-            DATABASE_URL: postgresql://postgres:prisma@postgres:5432/contas?schema=public
+            DATABASE_URL: postgresql://postgres:***@postgres:5432/contas?schema=public
             API_URL: http://api:3001
             EVOLUTION_API_URL: http://evolution-api:8080
-            JWT_SECRET: iasconta-jwt-secret-2026-producao
-            BOT_API_KEY: iasconta-bot-key-2026-producao
-            WEBHOOK_SECRET: 191deb2a8cd80beeb0bb2bb79866effd
+            JWT_SECRET: ${JWT_SECRET}
+            BOT_API_KEY: ${BOT_API_KEY}
+            WEBHOOK_SECRET: ${WEBHOOK_SECRET}
         ports:
             - "127.0.0.1:3001:3001"
         depends_on:
@@ -96,7 +96,7 @@ services:
             WEBHOOK_GLOBAL_ENABLED: "true"
             WEBHOOK_GLOBAL_URL: http://api:3001/webhook/evolution
             WEBHOOK_GLOBAL_EVENTS: "MESSAGES_UPSERT"
-            WEBHOOK_GLOBAL_HEADERS: '{"x-webhook-secret":"191deb2a8cd80beeb0bb2bb79866effd"}'
+            WEBHOOK_GLOBAL_HEADERS: '{"x-webhook-secret":"${WEBHOOK_SECRET}"}'
         depends_on:
             postgres:
                 condition: service_healthy

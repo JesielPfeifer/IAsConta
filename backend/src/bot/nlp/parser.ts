@@ -233,7 +233,7 @@ export async function processMessage(
       
       if (pending.question === 'fixa') {
         if (/^(sim|s|yes|y|claro|verdade|isso|correto)$/i.test(answer)) {
-          await callApi(`/api/transactions/${pending.transactionId}`, { isFixed: true }, 'PUT').catch(() => {});
+          await callApi(`/api/transactions/bot/${pending.transactionId}`, { isFixed: true }, 'PUT').catch(() => {});
           // Move to next question
           pending.question = 'parcelas';
           continue;
@@ -248,7 +248,7 @@ export async function processMessage(
         if (numMatch) {
           const total = parseInt(numMatch[1]);
           if (total > 1 && total <= 36) {
-            await callApi(`/api/transactions/${pending.transactionId}`, {
+            await callApi(`/api/transactions/bot/${pending.transactionId}`, {
               totalInstallments: total, currentInstallment: 1,
             }, 'PUT').catch(() => {});
             clearPendingState(senderInfo.senderId);

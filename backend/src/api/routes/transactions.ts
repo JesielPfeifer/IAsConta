@@ -209,17 +209,27 @@ router.delete("/:id", async (req: Request, res: Response) => {
 
     // If part of installment series, delete siblings too
     if (existing.totalInstallments > 1) {
-      const monthStart = new Date(existing.date.getFullYear(), existing.date.getMonth() - 1, 1);
-      const monthEnd = new Date(existing.date.getFullYear(), existing.date.getMonth() + existing.totalInstallments, 1);
-      
-      await prisma.transaction.deleteMany({
-        where: {
-          userId: user.id,
-          totalInstallments: existing.totalInstallments,
-          description: existing.description,
-          date: { gte: monthStart, lt: monthEnd },
-        },
-      });
+      if (existing.installmentGroupId) {
+        await prisma.transaction.deleteMany({
+          where: { userId: user.id, installmentGroupId: existing.installmentGroupId },
+        });
+      } else {
+        const idx = (existing.currentInstallment ?? 1) - 1;
+        const monthStart = new Date(existing.date.getFullYear(), existing.date.getMonth() - idx, 1);
+        const monthEnd = new Date(
+          existing.date.getFullYear(),
+          existing.date.getMonth() + (existing.totalInstallments - idx),
+          1
+        );
+        await prisma.transaction.deleteMany({
+          where: {
+            userId: user.id,
+            totalInstallments: existing.totalInstallments,
+            description: existing.description,
+            date: { gte: monthStart, lt: monthEnd },
+          },
+        });
+      }
     } else {
       await prisma.transaction.delete({ where: { id: id as string } });
     }
@@ -283,11 +293,19 @@ const botRouter = Router();
 botRouter.use(botAuthMiddleware);
 
 async function getBotUserId(req: Request): Promise<string> {
-  // Use userId from body if provided (from parser pipeline)
-  if (req.body?.userId) return req.body.userId;
+  // Verify userId from body against active WhatsAppUser
+  if (req.body?.userId) {
+    const linked = await prisma.whatsAppUser.findFirst({
+      where: { userId: req.body.userId, isActive: true },
+    });
+    if (linked) return linked.userId;
+  }
   
-  // Find first user with linked WhatsApp
-  const wa = await prisma.whatsAppUser.findFirst({ where: { isActive: true } });
+  // Find first user with linked WhatsApp (deterministic ordering)
+  const wa = await prisma.whatsAppUser.findFirst({
+    where: { isActive: true },
+    orderBy: { createdAt: "asc" },
+  });
   if (wa) return wa.userId;
   
   // Fallback: first user
@@ -356,6 +374,42 @@ botRouter.post("/", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
+    console.error(err);
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+// Bot-authenticated PUT for updating transactions (isFixed, installments, etc.)
+botRouter.put("/:id", async (req: Request, res: Response) => {
+  try {
+    const userId = await getBotUserId(req);
+    if (!userId) {
+      res.status(400).json({ error: "No user found" });
+      return;
+    }
+
+    const { id } = req.params;
+    const existing = await prisma.transaction.findFirst({
+      where: { id: id as string, userId },
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Transação não encontrada" });
+      return;
+    }
+
+    const updateData: Record<string, unknown> = {};
+    if (req.body.isFixed !== undefined) updateData.isFixed = req.body.isFixed;
+    if (req.body.totalInstallments !== undefined) updateData.totalInstallments = req.body.totalInstallments;
+    if (req.body.currentInstallment !== undefined) updateData.currentInstallment = req.body.currentInstallment;
+    if (req.body.installmentGroupId !== undefined) updateData.installmentGroupId = req.body.installmentGroupId;
+
+    const transaction = await prisma.transaction.update({
+      where: { id: id as string },
+      data: updateData as any,
+    });
+
+    res.json(transaction);
+  } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
