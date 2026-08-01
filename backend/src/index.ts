@@ -3,17 +3,22 @@ import express from "express";
 import cors from "cors";
 import multer from "multer";
 import { PrismaClient } from "@prisma/client";
+import { rateLimitMiddleware, corsOptions } from "./api/middleware/security.js";
 import authRoutes from "./api/routes/auth.js";
 import transactionRoutes, { botRouter } from "./api/routes/transactions.js";
 import categoryRoutes from "./api/routes/categories.js";
 import billRoutes, { botRouter as billBotRouter } from "./api/routes/bills.js";
 import budgetRoutes from "./api/routes/budgets.js";
+import goalRoutes from "./api/routes/goals.js";
+import investmentRoutes from "./api/routes/investments.js";
 import dashboardRoutes from "./api/routes/dashboard.js";
 import botDashboardRoutes from "./api/routes/botDashboard.js";
 import userRoutes from "./api/routes/users.js";
 import chatRoutes from "./api/routes/chat.js";
 import whatsappRoutes from "./api/routes/whatsapp.js";
+import whatsappUserRoutes from "./api/routes/whatsapp-users.js";
 import settingsRoutes from "./api/routes/settings.js";
+import annualRoutes from "./api/routes/annual.js";
 import { startWhatsApp, sendMessage } from "./bot/platforms/whatsapp.js";
 import { startDiscord } from "./bot/platforms/discord.js";
 import { startTelegram } from "./bot/platforms/telegram.js";
@@ -26,8 +31,11 @@ const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
-app.use(cors());
-app.use(express.json({ limit: "5mb" }));
+app.use(cors(corsOptions()));
+app.use(express.json({ limit: "50mb" }));
+
+// Rate limit: auth routes only
+app.use("/api/auth", rateLimitMiddleware);
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
@@ -40,12 +48,16 @@ app.use("/api/categories", categoryRoutes);
 app.use("/api/bills/bot", billBotRouter);
 app.use("/api/bills", billRoutes);
 app.use("/api/budgets", budgetRoutes);
+app.use("/api/goals", goalRoutes);
+app.use("/api/investments", investmentRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/bot/dashboard", botDashboardRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/whatsapp", whatsappRoutes);
+app.use("/api/whatsapp-users", whatsappUserRoutes);
 app.use("/api/settings", settingsRoutes);
+app.use("/api/annual", annualRoutes);
 
 app.post("/api/parse/nubank", upload.single("file"), async (req, res) => {
   try {
@@ -75,6 +87,15 @@ app.post("/api/parse/caixa", upload.single("file"), async (req, res) => {
 
 app.post("/webhook/evolution", async (req, res) => {
   try {
+    // Validate webhook secret
+    const webhookSecret = req.headers["x-webhook-secret"] as string;
+    const expectedSecret = process.env.WEBHOOK_SECRET || "";
+    if (expectedSecret && webhookSecret !== expectedSecret) {
+      console.warn("[webhook] Invalid webhook secret, rejecting");
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
     const body = req.body;
     const data = body?.data;
     if (!data) { res.sendStatus(200); return; }
@@ -96,12 +117,30 @@ app.post("/webhook/evolution", async (req, res) => {
 
     const text = rawText.replace(/@contas/gi, "").trim();
 
+    // Identify user by instance name from webhook
     const prisma = new PrismaClient();
-    const botEmail = process.env.BOT_DEFAULT_EMAIL || '';
     let botUserId = '';
-    if (botEmail) {
-      const u = await prisma.user.findUnique({ where: { email: botEmail } });
-      if (u) botUserId = u.id;
+    
+    // Try to find WhatsAppUser by instance name
+    const waUser = await prisma.whatsAppUser.findFirst({
+      where: { instanceName, isActive: true },
+    });
+    if (waUser) {
+      botUserId = waUser.userId;
+    } else {
+      // Fallback: first active WhatsAppUser (backward compat for default instance)
+      const fallback = await prisma.whatsAppUser.findFirst({
+        where: { isActive: true },
+        orderBy: { createdAt: "asc" },
+      });
+      if (fallback) {
+        botUserId = fallback.userId;
+      }
+    }
+    
+    if (!botUserId) {
+      res.sendStatus(200);
+      return;
     }
     const { getSetting } = await import('./api/services/settings.js');
     const allowedGroup = await getSetting(botUserId, 'whatsappGroupId', process.env.WHATSAPP_GROUP_ID || '');
@@ -117,7 +156,7 @@ app.post("/webhook/evolution", async (req, res) => {
     }
 
     if (text && text.trim().length > 0) {
-      const result = await processMessage(text, "whatsapp", { senderId, senderName, instanceName, isGroup });
+      const result = await processMessage(text, "whatsapp", { senderId, senderName, instanceName, isGroup }, botUserId);
       if (result.message) {
         await sendMessage(instanceName, senderId, result.message);
       }

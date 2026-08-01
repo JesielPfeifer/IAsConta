@@ -16,6 +16,14 @@ interface UserSettings {
   geminiApiKey: string;
 }
 
+interface WhatsAppStatus {
+  exists: boolean;
+  instanceName?: string;
+  connected: boolean;
+  connectionState: string;
+  phone?: string;
+}
+
 const EMPTY: UserSettings = {
   groqApiKey: '', wifeName: '', husbandName: '', whatsappGroupId: '', whatsappGroupName: '',
   botApiKey: '', evolutionApiKey: '', evolutionApiUrl: '',
@@ -23,11 +31,15 @@ const EMPTY: UserSettings = {
 };
 
 export default function Setup() {
+  // WhatsApp connection (single instance per logged-in user)
+  const [waStatus, setWaStatus] = useState<WhatsAppStatus>({ exists: false, connected: false, connectionState: 'none' });
+  const [qrLoading, setQrLoading] = useState(false);
   const [qrcode, setQrcode] = useState<string | null>(null);
-  const [connected, setConnected] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [qrError, setQrError] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
 
+  // Settings form
   const [form, setForm] = useState<UserSettings>(EMPTY);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -36,17 +48,106 @@ export default function Setup() {
   const [groupFound, setGroupFound] = useState<'idle' | 'found' | 'notfound'>('idle');
   const [foundGroupName, setFoundGroupName] = useState('');
 
+  // Load WhatsApp status
+  const fetchStatus = useCallback(async () => {
+    try {
+      const data = await api('/api/whatsapp-users');
+      setWaStatus(data);
+      if (data.connected) {
+        setQrcode(null);
+        setQrError('');
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Load settings
   useEffect(() => {
+    fetchStatus();
     api('/api/settings')
       .then((data) => setForm({ ...EMPTY, ...data }))
       .catch(() => {})
       .finally(() => setSettingsLoading(false));
-  }, []);
+  }, [fetchStatus]);
 
+  // Poll while QR is showing
+  useEffect(() => {
+    if (waStatus.connected || !qrcode) return;
+    const interval = setInterval(fetchStatus, 5000);
+    return () => clearInterval(interval);
+  }, [waStatus.connected, qrcode, fetchStatus]);
+
+  // Create/link WhatsApp instance
+  async function handleCreate() {
+    setCreating(true);
+    setQrError('');
+    try {
+      await api('/api/whatsapp-users', { method: 'POST', body: JSON.stringify({}) });
+      await fetchStatus();
+      // Now fetch QR code
+      await fetchQR();
+    } catch (err: any) {
+      setQrError(err.message || 'Erro ao criar instância');
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  // Fetch QR code
+  async function fetchQR() {
+    setQrLoading(true);
+    setQrError('');
+    try {
+      const data = await api('/api/whatsapp-users/qrcode');
+      if (data.connected) {
+        setQrcode(null);
+        await fetchStatus();
+      } else if (data.base64) {
+        setQrcode(data.base64);
+      } else {
+        setQrError('QR Code não disponível');
+      }
+    } catch (err: any) {
+      setQrError(err.message || 'Erro ao gerar QR Code');
+    } finally {
+      setQrLoading(false);
+    }
+  }
+
+  // Disconnect
+  async function handleDisconnect() {
+    setDisconnecting(true);
+    try {
+      await api('/api/whatsapp-users/disconnect', { method: 'POST' });
+      setQrcode(null);
+      await fetchStatus();
+    } catch (err: any) {
+      setQrError(err.message || 'Erro ao desconectar');
+    } finally {
+      setDisconnecting(false);
+    }
+  }
+
+  // Delete instance
+  async function handleUnlink() {
+    if (!confirm('Desvincular WhatsApp? A instância será removida.')) return;
+    try {
+      await api('/api/whatsapp-users', { method: 'DELETE' });
+      setQrcode(null);
+      setWaStatus({ exists: false, connected: false, connectionState: 'none' });
+    } catch (err: any) {
+      setQrError(err.message || 'Erro ao desvincular');
+    }
+  }
+
+  // -- Settings form --
   function setField(name: keyof UserSettings) {
     return (e: React.ChangeEvent<HTMLInputElement>) =>
       setForm((prev) => ({ ...prev, [name]: e.target.value }));
   }
+
+  const safeTrim = (val: string | null | undefined) => (val || '').trim();
 
   async function handleSave(e: FormEvent) {
     e.preventDefault();
@@ -64,12 +165,13 @@ export default function Setup() {
   }
 
   async function findGroup() {
-    const name = form.whatsappGroupName.trim();
+    const name = safeTrim(form.whatsappGroupName);
     if (!name) return;
     setFinding(true);
     setGroupFound('idle');
     try {
-      const data = await api(`/api/whatsapp/find-group?name=${encodeURIComponent(name)}`);
+      const instanceParam = waStatus.instanceName ? `&instance=${encodeURIComponent(waStatus.instanceName)}` : '';
+      const data = await api(`/api/whatsapp/find-group?name=${encodeURIComponent(name)}${instanceParam}`);
       setForm(prev => ({ ...prev, whatsappGroupId: data.id }));
       setGroupFound('found');
       setFoundGroupName(data.name);
@@ -81,37 +183,7 @@ export default function Setup() {
     }
   }
 
-  const fetchQRCode = useCallback(async () => {
-    try {
-      setError('');
-      const data = await api('/api/whatsapp/qrcode');
-      if (data.connected) { setConnected(true); setQrcode(null); }
-      else if (data.base64) { setQrcode(data.base64); }
-    } catch {
-      setError('Nao foi possivel conectar ao servidor');
-    } finally { setLoading(false); }
-  }, []);
-
-  const checkStatus = useCallback(async () => {
-    try {
-      const data = await api('/api/whatsapp/status');
-      if (data.connected) { setConnected(true); setQrcode(null); }
-    } catch {}
-  }, []);
-
-  const disconnect = async () => {
-    try {
-      await api('/api/whatsapp/disconnect', { method: 'POST' });
-      setConnected(false); setQrcode(null); fetchQRCode();
-    } catch { setError('Erro ao desconectar'); }
-  };
-
-  useEffect(() => { fetchQRCode(); }, [fetchQRCode]);
-  useEffect(() => {
-    if (connected || !qrcode) return;
-    const interval = setInterval(checkStatus, 5000);
-    return () => clearInterval(interval);
-  }, [connected, qrcode, checkStatus]);
+  const connected = waStatus.connected;
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-8">
@@ -126,28 +198,60 @@ export default function Setup() {
           <div className="flex items-center gap-3">
             <div className={`w-3 h-3 rounded-full ${connected ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
             <h2 className="text-lg font-semibold text-white">
-              {connected ? 'Conectado' : 'Desconectado'}
+              {connected ? 'Conectado' : waStatus.exists ? 'Desconectado' : 'WhatsApp'}
             </h2>
+            {waStatus.instanceName && (
+              <span className="text-xs text-gray-600 bg-gray-800 px-2 py-0.5 rounded">{waStatus.instanceName}</span>
+            )}
           </div>
-          {connected && (
-            <button onClick={disconnect} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 text-sm transition-colors">
-              <Power className="w-4 h-4" />Desconectar
-            </button>
-          )}
+          <div className="flex gap-2">
+            {connected && (
+              <button onClick={handleDisconnect} disabled={disconnecting}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 text-sm transition-colors">
+                <Power className="w-4 h-4" />
+                {disconnecting ? 'Desconectando...' : 'Desconectar'}
+              </button>
+            )}
+            {waStatus.exists && !connected && (
+              <button onClick={handleUnlink}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-700/50 hover:bg-gray-700 text-gray-400 text-sm transition-colors">
+                Desvincular
+              </button>
+            )}
+          </div>
         </div>
-        {loading && (
+
+        {/* Not created yet */}
+        {!waStatus.exists && (
+          <div className="flex flex-col items-center gap-4 py-8">
+            <Smartphone className="w-12 h-12 text-gray-600" />
+            <p className="text-gray-400 text-sm">Nenhum WhatsApp vinculado a esta conta.</p>
+            <button onClick={handleCreate} disabled={creating}
+              className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white rounded-xl text-sm font-semibold transition-colors">
+              {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <QrCode className="w-4 h-4" />}
+              {creating ? 'Criando...' : 'Vincular WhatsApp'}
+            </button>
+          </div>
+        )}
+
+        {/* QR loading */}
+        {qrLoading && (
           <div className="flex flex-col items-center gap-4 py-12">
             <Loader2 className="w-10 h-10 text-emerald-400 animate-spin" />
-            <p className="text-gray-400 text-sm">Carregando...</p>
+            <p className="text-gray-400 text-sm">Gerando QR Code...</p>
           </div>
         )}
-        {error && (
+
+        {/* QR error */}
+        {qrError && !qrLoading && (
           <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 text-red-400 text-sm text-center">
-            {error}
-            <button onClick={() => { setLoading(true); fetchQRCode(); }} className="ml-3 underline hover:text-red-300">Tentar novamente</button>
+            {qrError}
+            <button onClick={fetchQR} className="ml-3 underline hover:text-red-300">Tentar novamente</button>
           </div>
         )}
-        {!loading && !error && !connected && qrcode && (
+
+        {/* QR code display */}
+        {!qrLoading && !qrError && !connected && qrcode && (
           <div className="flex flex-col items-center gap-6 py-6">
             <div className="bg-white p-4 rounded-2xl shadow-xl">
               <img src={qrcode} alt="QR Code WhatsApp" className="w-64 h-64" />
@@ -163,20 +267,27 @@ export default function Setup() {
                 <li>3. Toque em "Conectar dispositivo"</li>
                 <li>4. Escaneie o QR Code acima</li>
               </ol>
-              <button onClick={() => { setLoading(true); fetchQRCode(); }} className="inline-flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 mt-2">
+              <button onClick={fetchQR}
+                className="inline-flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 mt-2">
                 <RefreshCw className="w-3.5 h-3.5" />Gerar novo QR Code
               </button>
             </div>
           </div>
         )}
-        {!loading && !error && !connected && !qrcode && (
-          <div className="flex flex-col items-center gap-3 py-12 text-gray-400">
-            <p className="text-sm">Nao foi possivel gerar o QR Code.</p>
-            <button onClick={() => { setLoading(true); fetchQRCode(); }} className="flex items-center gap-1.5 text-emerald-400 hover:text-emerald-300 text-sm">
-              <RefreshCw className="w-4 h-4" />Tentar novamente
+
+        {/* No QR, not loading, exists but not connected */}
+        {!qrLoading && !qrError && !connected && !qrcode && waStatus.exists && (
+          <div className="flex flex-col items-center gap-4 py-8">
+            <QrCode className="w-12 h-12 text-gray-600" />
+            <p className="text-gray-400 text-sm">Instancia nao conectada</p>
+            <button onClick={fetchQR}
+              className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-xl text-sm font-semibold transition-colors">
+              <QrCode className="w-4 h-4" />Gerar QR Code
             </button>
           </div>
         )}
+
+        {/* Connected state */}
         {connected && (
           <div className="flex flex-col items-center gap-4 py-8">
             <CheckCircle2 className="w-16 h-16 text-emerald-400" />
@@ -197,19 +308,29 @@ export default function Setup() {
             <div className="flex gap-2">
               <input type="text" value={form.whatsappGroupName} onChange={setField('whatsappGroupName')} placeholder="Ex: Contas"
                 className="flex-1 bg-white/[0.03] border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
-              <button type="button" onClick={findGroup} disabled={finding || !form.whatsappGroupName.trim()}
+              <button type="button" onClick={findGroup} disabled={finding || !safeTrim(form.whatsappGroupName)}
                 className="flex items-center gap-1.5 px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-40 text-gray-300 rounded-xl text-sm transition-colors">
                 <Search className="w-4 h-4" />{finding ? '...' : 'Buscar'}
               </button>
             </div>
             {groupFound === 'found' && (
-              <p className="text-xs text-emerald-400 mt-1">Grupo "{foundGroupName}" encontrado! ID configurado.</p>
+              <div className="mt-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                <p className="text-sm text-emerald-400 font-medium">✅ Grupo "{foundGroupName}" encontrado!</p>
+                <p className="text-xs text-emerald-400/60 mt-1">ID: {form.whatsappGroupId}</p>
+                <p className="text-xs text-gray-500 mt-2">⚠️ Role a pagina e clique em <strong>Salvar Configuracoes</strong> para aplicar.</p>
+              </div>
             )}
             {groupFound === 'notfound' && (
-              <p className="text-xs text-red-400 mt-1">Grupo nao encontrado. Verifique o nome ou conecte o WhatsApp primeiro.</p>
+              <div className="mt-3 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
+                <p className="text-sm text-red-400">❌ Grupo nao encontrado</p>
+                <p className="text-xs text-red-400/60 mt-1">Verifique se ha um WhatsApp conectado e o nome esta correto.</p>
+              </div>
             )}
-            {form.whatsappGroupId && (
-              <p className="text-xs text-gray-600 mt-1 truncate">ID: {form.whatsappGroupId}</p>
+            {finding && (
+              <div className="mt-3 flex items-center gap-2 text-gray-400 text-sm">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Buscando grupos...
+              </div>
             )}
           </div>
         </div>
