@@ -122,9 +122,9 @@ model BankConnection {
 
 model WhatsAppUser {
   id           String   @id @default(uuid())
-  phone        String   @unique
+  phone        String?
   instanceName String   @unique
-  userId       String
+  userId       String   @unique
   user         User     @relation(fields: [userId], references: [id])
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
@@ -148,6 +148,8 @@ model GoalMonth {
   goal   Goal   @relation(fields: [goalId], references: [id], onDelete: Cascade)
   month  String // "2026-01"
   amount Float  @default(0)
+
+  @@unique([goalId, month])
 }
 
 model Investment {

@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { PrismaClient } from "@prisma/client";
 import { authMiddleware } from "../middleware/auth.js";
-import { ensureInstanceForUser, removeInstance, getQRCode, getConnectionState } from "../../bot/platforms/whatsapp.js";
+import { ensureInstanceForUser, removeInstance, getQRCode, getConnectionState, disconnectInstance } from "../../bot/platforms/whatsapp.js";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -14,7 +14,7 @@ const linkSchema = z.object({
 });
 
 function userInstanceName(userId: string): string {
-  return `wa-${userId.substring(0, 8)}`;
+  return `wa-${userId}`;
 }
 
 // GET / — get the current user's WhatsApp instance with connection status
@@ -87,7 +87,7 @@ router.post("/", async (req: Request, res: Response) => {
     // Save to database
     const waUser = await prisma.whatsAppUser.create({
       data: {
-        phone: phone || "",
+        phone: phone || null,
         userId: user.id,
         isActive: true,
         instanceName,
@@ -173,7 +173,6 @@ router.post("/disconnect", async (req: Request, res: Response) => {
       return;
     }
 
-    const { disconnectInstance } = await import("../../bot/platforms/whatsapp.js");
     const ok = await disconnectInstance(wa.instanceName, user.id);
     res.json({ success: ok });
   } catch (err) {

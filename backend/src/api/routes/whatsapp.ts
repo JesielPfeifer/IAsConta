@@ -1,7 +1,10 @@
 import { Router, Request, Response } from "express";
+import { authMiddleware } from "../middleware/auth.js";
 import { getQRCode, getConnectionState, disconnectInstance, findGroupByName } from "../../bot/platforms/whatsapp.js";
 
 const router = Router();
+
+router.use(authMiddleware);
 
 // GET /qrcode — legacy: get QR code for default instance
 router.get("/qrcode", async (req: Request, res: Response) => {

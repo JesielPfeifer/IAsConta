@@ -15,6 +15,15 @@ async function getBotUserId(): Promise<string> {
   return u?.id || '';
 }
 
+async function getUserIdByInstance(instanceName: string): Promise<string> {
+  const wa = await prismaSettings.whatsAppUser.findFirst({
+    where: { instanceName, isActive: true },
+  });
+  if (wa) return wa.userId;
+  // Fallback to bot user
+  return getBotUserId();
+}
+
 async function getEvoApiKey(userId?: string): Promise<string> {
   if (!userId) return process.env.EVOLUTION_API_KEY || '';
   const { getSetting } = await import('../../api/services/settings.js');
@@ -102,8 +111,9 @@ export async function ensureInstanceForUser(instanceName: string, userId: string
  */
 export async function removeInstance(instanceName: string, userId?: string): Promise<boolean> {
   try {
-    const apiUrl = await getEvoApiUrl(userId ?? await getBotUserId());
-    const h = await headers(userId ?? await getBotUserId());
+  const ownerId = userId ?? await getBotUserId();
+    const apiUrl = await getEvoApiUrl(ownerId);
+    const h = await headers(ownerId);
 
     // Logout first
     await fetch(`${apiUrl}/instance/logout/${instanceName}`, {
@@ -260,11 +270,11 @@ async function refreshGroupCache(instanceName?: string): Promise<void> {
 
 // No global interval — call refreshGroupCache per instance as needed
 
-export async function findGroupByName(groupName: string, instanceName?: string): Promise<{ id: string; name: string } | null> {
+export async function findGroupByName(groupName: string, instanceName?: string, userId?: string): Promise<{ id: string; name: string } | null> {
   const name = instanceName || DEFAULT_INSTANCE;
-  const botUserId = await getBotUserId();
-  const apiUrl = await getEvoApiUrl(botUserId);
-  const h = await headers(botUserId);
+  const ownerId = userId ?? await getUserIdByInstance(name);
+  const apiUrl = await getEvoApiUrl(ownerId);
+  const h = await headers(ownerId);
   
   // Use cache if available and fresh
   const cached = groupCacheMap.get(name);
@@ -290,14 +300,15 @@ export async function sendMessage(
   instanceName: string,
   to: string,
   text: string,
+  userId?: string,
 ): Promise<boolean> {
   try {
-    const botUserId = await getBotUserId();
-    const apiUrl = await getEvoApiUrl(botUserId);
+    const ownerId = userId ?? await getUserIdByInstance(instanceName);
+    const apiUrl = await getEvoApiUrl(ownerId);
     const url = `${apiUrl}/message/sendText/${instanceName || DEFAULT_INSTANCE}`;
     const response = await fetch(url, {
       method: 'POST',
-      headers: await headers(botUserId),
+      headers: await headers(ownerId),
       body: JSON.stringify({ number: to, text }),
     });
 

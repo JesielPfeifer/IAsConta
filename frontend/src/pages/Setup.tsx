@@ -36,6 +36,7 @@ export default function Setup() {
   const [qrLoading, setQrLoading] = useState(false);
   const [qrcode, setQrcode] = useState<string | null>(null);
   const [qrError, setQrError] = useState('');
+  const [actionError, setActionError] = useState('');
   const [creating, setCreating] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
 
@@ -123,7 +124,7 @@ export default function Setup() {
       setQrcode(null);
       await fetchStatus();
     } catch (err: any) {
-      setQrError(err.message || 'Erro ao desconectar');
+      setActionError(err.message || 'Erro ao desconectar');
     } finally {
       setDisconnecting(false);
     }
@@ -137,7 +138,7 @@ export default function Setup() {
       setQrcode(null);
       setWaStatus({ exists: false, connected: false, connectionState: 'none' });
     } catch (err: any) {
-      setQrError(err.message || 'Erro ao desvincular');
+      setActionError(err.message || 'Erro ao desvincular');
     }
   }
 
@@ -247,6 +248,13 @@ export default function Setup() {
           <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 text-red-400 text-sm text-center">
             {qrError}
             <button onClick={fetchQR} className="ml-3 underline hover:text-red-300">Tentar novamente</button>
+          </div>
+        )}
+
+        {/* Action error (disconnect/unlink) */}
+        {actionError && (
+          <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 text-red-400 text-sm text-center">
+            {actionError}
           </div>
         )}
 
