@@ -180,25 +180,17 @@ router.post("/:id/months", async (req: Request, res: Response) => {
       return;
     }
 
-    const existing = await prisma.goalMonth.findFirst({
-      where: { goalId: id, month: data.month },
+    const month = await prisma.goalMonth.upsert({
+      where: {
+        goalId_month: { goalId: id, month: data.month },
+      },
+      update: { amount: data.amount },
+      create: {
+        goalId: id,
+        month: data.month,
+        amount: data.amount,
+      },
     });
-
-    let month;
-    if (existing) {
-      month = await prisma.goalMonth.update({
-        where: { id: existing.id },
-        data: { amount: data.amount },
-      });
-    } else {
-      month = await prisma.goalMonth.create({
-        data: {
-          goalId: id,
-          month: data.month,
-          amount: data.amount,
-        },
-      });
-    }
 
     res.json(month);
   } catch (err) {

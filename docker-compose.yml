@@ -37,7 +37,7 @@ services:
         env_file:
             - ./backend/.env
         environment:
-            DATABASE_URL: postgresql://postgres:***@postgres:5432/contas?schema=public
+            DATABASE_URL: postgresql://postgres:prisma@postgres:5432/contas?schema=public
             API_URL: http://api:3001
             EVOLUTION_API_URL: http://evolution-api:8080
             JWT_SECRET: ${JWT_SECRET}

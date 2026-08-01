@@ -181,6 +181,7 @@ export default function TransactionForm({ transaction, onSave, onClose }: Props)
                     <option value="DEBITO" />
                     <option value="CAIXA" />
                     <option value="NUBANK" />
+                    <option value="CREDITO" />
                     <option value="CREDITO_3" />
                     <option value="CREDITO_4" />
                     <option value="PIX" />

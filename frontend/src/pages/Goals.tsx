@@ -83,7 +83,7 @@ export default function Goals() {
           <div className="flex flex-col gap-1">
             <p className="text-sm font-medium text-emerald-400/80">Planejamento</p>
             <h1 className="text-3xl font-bold tracking-tight text-white">Metas Financeiras</h1>
-            <p className="text-sm text-gray-400">Acompanhe o progresso das suas metas mes a mes</p>
+            <p className="text-sm text-gray-400">Acompanhe o progresso das suas metas mês a mês</p>
           </div>
           <button
             onClick={() => setShowModal(true)}
@@ -198,7 +198,7 @@ export default function Goals() {
                                 defaultValue={currentAmount || ''}
                                 onBlur={(e) => handleMonthBlur(goal.id, monthStr, e.target.value)}
                                 onKeyDown={(e) => {
-                                  if (e.key === 'Enter') handleMonthBlur(goal.id, monthStr, (e.target as HTMLInputElement).value);
+                                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                                   if (e.key === 'Escape') setEditingMonth(null);
                                 }}
                               />
@@ -230,11 +230,11 @@ export default function Goals() {
 
       {/* New Goal Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="new-goal-title" onKeyDown={(e) => { if (e.key === 'Escape') setShowModal(false); }}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowModal(false)} />
           <div className="relative bg-gray-900 border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl shadow-black/50">
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+              <h2 id="new-goal-title" className="text-lg font-semibold text-white flex items-center gap-2">
                 <Target className="w-5 h-5 text-emerald-400" />
                 Nova Meta
               </h2>

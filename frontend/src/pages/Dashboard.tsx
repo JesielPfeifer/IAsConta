@@ -36,7 +36,7 @@ interface CreditCardTx {
 export default function Dashboard() {
   const [month, setMonth] = useState(dayjs().format('YYYY-MM'));
   const { summary, byCategory, byPayment, creditCardTotal, comparison, yearAnalysis, tip, loading } = useDashboard(month);
-  const { transactions, refresh: refreshTx } = useTransactions({});
+  const { transactions } = useTransactions({ month });
   
   const [bills, setBills] = useState<Bill[]>([]);
   const [creditCardTx, setCreditCardTx] = useState<CreditCardTx[]>([]);
@@ -114,10 +114,7 @@ export default function Dashboard() {
             <input
               type="month"
               value={month}
-              onChange={(e) => {
-                setMonth(e.target.value);
-                refreshTx();
-              }}
+              onChange={(e) => setMonth(e.target.value)}
               className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500 [color-scheme:dark]"
             />
           </div>
@@ -416,10 +413,10 @@ export default function Dashboard() {
                     </td>
                     <td className="py-3 text-gray-400">{tx.currentInstallment}/{tx.totalInstallments}</td>
                     <td className="py-3 text-gray-300 tabular-nums">
-                      {formatCurrency(tx.amount)}
+                      {formatCurrency(tx.installmentAmount ?? tx.amount)}
                     </td>
                     <td className="py-3 text-right font-semibold tabular-nums text-amber-400">
-                      {formatCurrency(tx.amount * tx.totalInstallments)}
+                      {formatCurrency(tx.amount)}
                     </td>
                   </tr>
                 ))}

@@ -454,6 +454,7 @@ router.get("/credit-card-detail", async (req: Request, res: Response) => {
       id: t.id,
       description: t.description,
       amount: t.amount,
+      installmentAmount: t.totalInstallments > 0 ? t.amount / t.totalInstallments : t.amount,
       date: t.date,
       categoryName: t.category?.name || null,
       paymentMethod: t.paymentMethod || "Cartao",

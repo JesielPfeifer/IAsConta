@@ -157,9 +157,10 @@ router.put("/:id", async (req: Request, res: Response) => {
       if (existing.installmentGroupId) {
         siblingWhere.installmentGroupId = existing.installmentGroupId;
       } else {
-        // Legacy: match by description + date range
-        const monthStart = new Date(existing.date.getFullYear(), existing.date.getMonth() - 1, 1);
-        const monthEnd = new Date(existing.date.getFullYear(), existing.date.getMonth() + existing.totalInstallments, 1);
+        // Legacy: match by description + date range, offset by currentInstallment
+        const idx = (existing.currentInstallment ?? 1) - 1;
+        const monthStart = new Date(existing.date.getFullYear(), existing.date.getMonth() - idx, 1);
+        const monthEnd = new Date(existing.date.getFullYear(), existing.date.getMonth() + (existing.totalInstallments - idx), 1);
         siblingWhere.description = existing.description;
         siblingWhere.date = { gte: monthStart, lt: monthEnd };
       }
