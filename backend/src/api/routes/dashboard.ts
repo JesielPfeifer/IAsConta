@@ -30,6 +30,9 @@ router.get("/summary", async (req: Request, res: Response) => {
         where: {
           userId: user.id,
           date: { gte: start, lt: end },
+          // Transactions linked to a credit card fatura are excluded: the
+          // corresponding Bill row already counts that expense once.
+          billId: null,
         },
         include: { category: true },
       }),
@@ -133,6 +136,7 @@ router.get("/by-category", async (req: Request, res: Response) => {
           userId: user.id,
           type: "EXPENSE",
           date: { gte: start, lt: end },
+          billId: null,
         },
         include: { category: true },
       }),
@@ -182,6 +186,7 @@ router.get("/percentage", async (req: Request, res: Response) => {
           userId: user.id,
           type: "EXPENSE",
           date: { gte: start, lt: end },
+          billId: null,
         },
       }),
       prisma.bill.findMany({
@@ -251,7 +256,7 @@ router.get("/by-payment", async (req: Request, res: Response) => {
     const { start, end } = getMonthRange(req.query.month as string);
 
     const transactions = await prisma.transaction.findMany({
-      where: { userId: user.id, type: "EXPENSE", date: { gte: start, lt: end } },
+      where: { userId: user.id, type: "EXPENSE", date: { gte: start, lt: end }, billId: null },
     });
 
     const byPayment: Record<string, number> = {};
@@ -277,7 +282,10 @@ router.get("/credit-card-total", async (req: Request, res: Response) => {
       where: {
         userId: user.id,
         type: "EXPENSE",
-        paymentMethod: { in: ["NUBANK", "CREDITO_3", "CREDITO_4"] },
+        OR: [
+          { paymentMethod: { in: ["NUBANK", "CREDITO_3", "CREDITO_4"] } },
+          { isCreditCard: true },
+        ],
         totalInstallments: { gt: 1 },
       },
     });
@@ -304,8 +312,8 @@ router.get("/comparison", async (req: Request, res: Response) => {
     const prevEnd = new Date(start);
 
     const [currTx, prevTx] = await Promise.all([
-      prisma.transaction.findMany({ where: { userId: user.id, date: { gte: start, lt: end } } }),
-      prisma.transaction.findMany({ where: { userId: user.id, date: { gte: prevStart, lt: prevEnd } } }),
+      prisma.transaction.findMany({ where: { userId: user.id, date: { gte: start, lt: end }, billId: null } }),
+      prisma.transaction.findMany({ where: { userId: user.id, date: { gte: prevStart, lt: prevEnd }, billId: null } }),
     ]);
 
     const currIncome = currTx.filter((t) => t.type === "INCOME").reduce((s, t) => s + t.amount, 0);
@@ -338,7 +346,7 @@ router.get("/year-analysis", async (req: Request, res: Response) => {
     const end = new Date(year + 1, 0, 1);
 
     const transactions = await prisma.transaction.findMany({
-      where: { userId: user.id, type: "EXPENSE", date: { gte: start, lt: end } },
+      where: { userId: user.id, type: "EXPENSE", date: { gte: start, lt: end }, billId: null },
       include: { category: true },
     });
 
@@ -384,7 +392,13 @@ router.get("/tip", async (req: Request, res: Response) => {
       }),
       prisma.transaction.groupBy({
         by: ["categoryId"],
-        where: { userId: user.id, type: "EXPENSE", date: { gte: start, lt: end } },
+        where: {
+          userId: user.id,
+          type: "EXPENSE",
+          date: { gte: start, lt: end },
+          billId: null,
+          categoryId: { not: null },
+        },
         _sum: { amount: true },
         orderBy: { _sum: { amount: "desc" } },
       }),
@@ -443,7 +457,10 @@ router.get("/credit-card-detail", async (req: Request, res: Response) => {
         userId: user.id,
         type: "EXPENSE",
         date: { gte: start, lt: end },
-        paymentMethod: { in: ["NUBANK", "CAIXA", "CREDITO_3", "CREDITO_4", "CREDITO"] },
+        OR: [
+          { paymentMethod: { in: ["NUBANK", "CAIXA", "CREDITO_3", "CREDITO_4", "CREDITO"] } },
+          { isCreditCard: true },
+        ],
         totalInstallments: { gt: 1 },
       },
       include: { category: true },

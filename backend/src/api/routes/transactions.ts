@@ -17,12 +17,16 @@ const createTransactionSchema = z.object({
   date: z.string().datetime(),
   person: z.enum(["HUSBAND", "WIFE", "COUPLE"]).optional().nullable(),
   isShared: z.boolean().optional(),
-  source: z.enum(["MANUAL", "BOT", "NUBANK_CSV", "CAIXA_PDF"]).optional(),
+  source: z.enum(["MANUAL", "BOT", "NUBANK_CSV", "CAIXA_PDF", "PLUGGY"]).optional(),
   paymentMethod: z.string().optional().nullable(),
   totalInstallments: z.number().int().optional(),
   currentInstallment: z.number().int().optional(),
   installmentGroupId: z.string().optional(),
   isFixed: z.boolean().optional(),
+  externalId: z.string().optional().nullable(),
+  isCreditCard: z.boolean().optional(),
+  billId: z.string().optional().nullable(),
+  pluggyAccountId: z.string().optional().nullable(),
 });
 
 const updateTransactionSchema = z.object({
@@ -33,11 +37,12 @@ const updateTransactionSchema = z.object({
   date: z.string().datetime().optional(),
   person: z.enum(["HUSBAND", "WIFE", "COUPLE"]).optional().nullable(),
   isShared: z.boolean().optional(),
-  source: z.enum(["MANUAL", "BOT", "NUBANK_CSV", "CAIXA_PDF"]).optional(),
+  source: z.enum(["MANUAL", "BOT", "NUBANK_CSV", "CAIXA_PDF", "PLUGGY"]).optional(),
   paymentMethod: z.string().optional().nullable(),
   totalInstallments: z.number().int().optional(),
   currentInstallment: z.number().int().optional(),
   isFixed: z.boolean().optional(),
+  billId: z.string().optional().nullable(),
 });
 
 const botTransactionSchema = z.object({
@@ -63,9 +68,14 @@ router.use(authMiddleware);
 router.get("/", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
-    const { month, categoryId, person, type, source, isShared, paymentMethod } = req.query;
+    const { month, categoryId, person, type, source, isShared, paymentMethod, includeBill } = req.query;
 
     const where: Record<string, unknown> = { userId: user.id };
+
+    // By default, transactions linked to a credit card fatura (billId) are
+    // excluded: the Bill row already counts that expense. Pass includeBill=true
+    // to see them (e.g. fatura detailing).
+    if (includeBill !== "true") where.billId = null;
 
     if (month) {
       const startOfMonth = new Date(`${month}-01T00:00:00.000Z`);

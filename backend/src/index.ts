@@ -20,6 +20,7 @@ import whatsappUserRoutes from "./api/routes/whatsapp-users.js";
 import whatsappInstanceRoutes from "./api/routes/whatsapp-instance.js";
 import settingsRoutes from "./api/routes/settings.js";
 import annualRoutes from "./api/routes/annual.js";
+import pluggyRoutes from "./api/routes/pluggy.js";
 import { startWhatsApp, sendMessage } from "./bot/platforms/whatsapp.js";
 import { startDiscord } from "./bot/platforms/discord.js";
 import { startTelegram } from "./bot/platforms/telegram.js";
@@ -61,6 +62,7 @@ app.use("/api/whatsapp-instance", whatsappInstanceRoutes);
 app.use("/api/whatsapp-users", whatsappUserRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/annual", annualRoutes);
+app.use("/api/pluggy", pluggyRoutes);
 
 app.post("/api/parse/nubank", upload.single("file"), async (req, res) => {
   try {

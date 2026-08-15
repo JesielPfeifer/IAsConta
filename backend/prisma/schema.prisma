@@ -46,9 +46,16 @@ model Transaction {
   currentInstallment Int             @default(1)
   installmentGroupId String?
   isFixed            Boolean         @default(false)
+  // Pluggy integration
+  externalId         String?         // Pluggy transaction id (dedupe)
+  isCreditCard       Boolean         @default(false)
+  billId             String?         // Pluggy credit card bill id (fatura) this tx belongs to
+  pluggyAccountId    String?         // Pluggy account id that originated this tx
   userId      String
   user        User            @relation(fields: [userId], references: [id])
   createdAt   DateTime        @default(now())
+
+  @@unique([userId, externalId])
 }
 
 model Category {
@@ -77,9 +84,15 @@ model Bill {
   category          Category? @relation(fields: [categoryId], references: [id])
   totalInstallments Int       @default(1)
   currentInstallment Int      @default(1)
+  // Pluggy integration (credit card faturas)
+  source            Source    @default(MANUAL)
+  externalId        String?   // Pluggy bill id (fatura) — dedupe
+  pluggyAccountId   String?   // Pluggy credit card account id
   userId            String
   user              User      @relation(fields: [userId], references: [id])
   createdAt         DateTime  @default(now())
+
+  @@unique([userId, externalId])
 }
 
 model Budget {
@@ -113,11 +126,18 @@ model UserSettings {
 }
 
 model BankConnection {
-  id        String   @id @default(uuid())
-  bankName  String
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  createdAt DateTime @default(now())
+  id           String    @id @default(uuid())
+  bankName     String
+  // Pluggy integration
+  itemId       String?   @unique // Pluggy item id
+  connectorId  Int?
+  connectorName String?
+  status       String?          // Pluggy item status (LOGIN_OK, LOGIN_ERROR, ...)
+  lastSyncAt   DateTime?
+  errorMessage String?
+  userId       String
+  user         User      @relation(fields: [userId], references: [id])
+  createdAt    DateTime  @default(now())
 }
 
 model WhatsAppUser {
@@ -179,4 +199,5 @@ enum Source {
   BOT
   NUBANK_CSV
   CAIXA_PDF
+  PLUGGY
 }

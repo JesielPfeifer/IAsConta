@@ -40,6 +40,7 @@ router.get("/summary", async (req: Request, res: Response) => {
         where: {
           userId: user.id,
           date: { gte: start, lt: end },
+          billId: null,
         },
         include: { category: true },
       }),
@@ -145,6 +146,7 @@ router.get("/by-category", async (req: Request, res: Response) => {
           userId: user.id,
           type: "EXPENSE",
           date: { gte: start, lt: end },
+          billId: null,
         },
         include: { category: true },
       }),
@@ -198,6 +200,7 @@ router.get("/percentage", async (req: Request, res: Response) => {
           userId: user.id,
           type: "EXPENSE",
           date: { gte: start, lt: end },
+          billId: null,
         },
       }),
       prisma.bill.findMany({
@@ -277,6 +280,7 @@ router.get("/last-7-days", async (req: Request, res: Response) => {
       where: {
         userId: user.id,
         date: { gte: start, lte: end },
+        billId: null,
       },
       include: { category: true },
       orderBy: { date: 'desc' },
