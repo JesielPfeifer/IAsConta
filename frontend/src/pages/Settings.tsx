@@ -2,6 +2,7 @@ import { useState, useEffect, type FormEvent } from 'react';
 import { Cog, Save, Key, Users, Bot, MessageCircle } from 'lucide-react';
 import { api } from '../api/client';
 import WhatsAppInstanceCard from '../components/WhatsAppInstanceCard';
+import PluggySettingsCard from '../components/PluggySettingsCard';
 
 interface UserSettings {
   groqApiKey: string;
@@ -14,6 +15,8 @@ interface UserSettings {
   discordToken: string;
   telegramToken: string;
   geminiApiKey: string;
+  pluggyClientId: string;
+  pluggyClientSecret: string;
 }
 
 const EMPTY: UserSettings = {
@@ -27,6 +30,8 @@ const EMPTY: UserSettings = {
   discordToken: '',
   telegramToken: '',
   geminiApiKey: '',
+  pluggyClientId: '',
+  pluggyClientSecret: '',
 };
 
 export default function Settings() {
@@ -131,6 +136,8 @@ export default function Settings() {
         </section>
 
         <WhatsAppInstanceCard />
+
+        <PluggySettingsCard />
 
         <section className="bg-gray-900/50 border border-white/10 rounded-2xl p-6 space-y-4">
           <SectionHeader icon={Users} title="Integrantes" />

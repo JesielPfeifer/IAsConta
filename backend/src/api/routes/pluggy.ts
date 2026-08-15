@@ -2,23 +2,36 @@ import { Router, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { authMiddleware } from "../middleware/auth.js";
 import {
-  isPluggyConfigured,
-  createConnectToken,
-  listConnectors,
-  createItem,
-  updateItem,
-  deleteItem,
-  getItem,
-  sendItemMFA,
+  createPluggyClient,
+  resolveCredentials,
   PluggyError,
+  type PluggyCredentials,
+  type PluggyClient,
 } from "../services/pluggy.js";
-import { syncItem, syncAllForUser, handlePluggyWebhook } from "../services/pluggy-sync.js";
+import {
+  syncItem,
+  syncAllForUser,
+  handlePluggyWebhook,
+  resolveCredentialsForUser,
+} from "../services/pluggy-sync.js";
 
 const router = Router();
 const prisma = new PrismaClient();
 
+const WEBHOOK_EVENTS = [
+  "item/updated",
+  "transactions/created",
+  "transactions/updated",
+  "transactions/deleted",
+];
+
 function pluggyWebhookUrl(): string | null {
   return process.env.PLUGGY_WEBHOOK_URL || null;
+}
+
+/** Credentials for the logged-in user: own settings first, global env as fallback. */
+async function credsForUser(userId: string): Promise<PluggyCredentials | null> {
+  return resolveCredentialsForUser(userId);
 }
 
 // All routes except /webhook require auth
@@ -27,20 +40,38 @@ router.use((req, res, next) => {
   authMiddleware(req as Request, res as Response, next as () => void);
 });
 
-// GET /api/pluggy/status — config status
-router.get("/status", async (_req: Request, res: Response) => {
-  res.json({
-    configured: isPluggyConfigured(),
-    webhookUrl: pluggyWebhookUrl(),
-  });
+// GET /api/pluggy/status — config status for the current user
+router.get("/status", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    const settings = await prisma.userSettings.findUnique({ where: { userId: user.id } });
+    const hasUserCreds = Boolean(settings?.pluggyClientId && settings?.pluggyClientSecret);
+    const globalConfigured = Boolean(process.env.PLUGGY_CLIENT_ID && process.env.PLUGGY_CLIENT_SECRET);
+    res.json({
+      configured: hasUserCreds || globalConfigured,
+      userConfigured: hasUserCreds,
+      globalConfigured,
+      webhookUrl: pluggyWebhookUrl(),
+    });
+  } catch (err) {
+    console.error("[pluggy] status:", err);
+    res.status(500).json({ error: "Erro interno" });
+  }
 });
 
 // GET /api/pluggy/connectors?search=&sandbox= — institutions available
 router.get("/connectors", async (req: Request, res: Response) => {
   try {
+    const user = req.user!;
+    const creds = await credsForUser(user.id);
+    if (!creds) {
+      res.status(400).json({ error: "Configure suas credenciais Pluggy nas Configurações primeiro" });
+      return;
+    }
+    const client = createPluggyClient(creds);
     const search = (req.query.search as string) || undefined;
     const sandbox = req.query.sandbox === "true";
-    const connectors = await listConnectors(search, sandbox);
+    const connectors = await client.listConnectors(search, sandbox);
     res.json(connectors);
   } catch (err) {
     console.error("[pluggy] listConnectors:", err);
@@ -52,8 +83,14 @@ router.get("/connectors", async (req: Request, res: Response) => {
 router.post("/connect-token", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
+    const creds = await credsForUser(user.id);
+    if (!creds) {
+      res.status(400).json({ error: "Configure suas credenciais Pluggy nas Configurações primeiro" });
+      return;
+    }
+    const client = createPluggyClient(creds);
     const { itemId } = req.body as { itemId?: string };
-    const token = await createConnectToken({
+    const token = await client.createConnectToken({
       clientUserId: user.id,
       webhookUrl: pluggyWebhookUrl() || undefined,
       itemId,
@@ -70,6 +107,12 @@ router.post("/connect-token", async (req: Request, res: Response) => {
 router.post("/items", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
+    const creds = await credsForUser(user.id);
+    if (!creds) {
+      res.status(400).json({ error: "Configure suas credenciais Pluggy nas Configurações primeiro" });
+      return;
+    }
+    const client = createPluggyClient(creds);
     const { connectorId, credentials, products } = req.body as {
       connectorId: number;
       credentials: Record<string, string>;
@@ -79,7 +122,7 @@ router.post("/items", async (req: Request, res: Response) => {
       res.status(400).json({ error: "connectorId e credentials são obrigatórios" });
       return;
     }
-    const item = await createItem({
+    const item = await client.createItem({
       connectorId,
       credentials,
       webhookUrl: pluggyWebhookUrl() || undefined,
@@ -115,12 +158,15 @@ router.get("/items", async (req: Request, res: Response) => {
       orderBy: { createdAt: "desc" },
     });
 
+    const creds = await credsForUser(user.id);
+    const client = creds ? createPluggyClient(creds) : null;
+
     // Refresh status from Pluggy for item-based connections
     const enriched = await Promise.all(
       connections.map(async (conn) => {
-        if (!conn.itemId) return conn;
+        if (!conn.itemId || !client) return conn;
         try {
-          const item = await getItem(conn.itemId);
+          const item = await client.getItem(conn.itemId);
           return { ...conn, status: item.status, lastSyncAt: item.lastSyncAt || conn.lastSyncAt };
         } catch {
           return conn;
@@ -170,7 +216,13 @@ router.post("/items/:itemId/update", async (req: Request, res: Response) => {
       res.status(404).json({ error: "Conexão não encontrada" });
       return;
     }
-    const item = await updateItem(itemId);
+    const creds = await credsForUser(user.id);
+    if (!creds) {
+      res.status(400).json({ error: "Pluggy não configurado" });
+      return;
+    }
+    const client = createPluggyClient(creds);
+    const item = await client.updateItem(itemId);
     res.json(item);
   } catch (err) {
     console.error("[pluggy] update item:", err);
@@ -193,7 +245,13 @@ router.post("/items/:itemId/mfa", async (req: Request, res: Response) => {
       res.status(404).json({ error: "Conexão não encontrada" });
       return;
     }
-    const item = await sendItemMFA(itemId, mfa);
+    const creds = await credsForUser(user.id);
+    if (!creds) {
+      res.status(400).json({ error: "Pluggy não configurado" });
+      return;
+    }
+    const client = createPluggyClient(creds);
+    const item = await client.sendItemMFA(itemId, mfa);
     res.json(item);
   } catch (err) {
     console.error("[pluggy] mfa:", err);
@@ -212,20 +270,25 @@ router.delete("/items/:itemId", async (req: Request, res: Response) => {
       return;
     }
 
-    try {
-      await deleteItem(itemId);
-    } catch (err) {
-      // Item may already be gone on Pluggy's side — continue cleanup
-      console.warn("[pluggy] delete item remoto falhou:", (err as Error).message);
+    const creds = await credsForUser(user.id);
+    if (creds) {
+      const client = createPluggyClient(creds);
+      try {
+        await client.deleteItem(itemId);
+      } catch (err) {
+        // Item may already be gone on Pluggy's side — continue cleanup
+        console.warn("[pluggy] delete item remoto falhou:", (err as Error).message);
+      }
     }
 
     // Remove imported data (transactions + faturas from this item's accounts)
+    const accountIds = await getAccountIdsForConnection(itemId, user.id);
     await prisma.$transaction([
       prisma.transaction.deleteMany({
-        where: { userId: user.id, pluggyAccountId: { in: await getAccountIds(itemId) } },
+        where: { userId: user.id, pluggyAccountId: { in: accountIds } },
       }),
       prisma.bill.deleteMany({
-        where: { userId: user.id, pluggyAccountId: { in: await getAccountIds(itemId) } },
+        where: { userId: user.id, pluggyAccountId: { in: accountIds } },
       }),
       prisma.bankConnection.delete({ where: { id: conn.id } }),
     ]);
@@ -237,10 +300,49 @@ router.delete("/items/:itemId", async (req: Request, res: Response) => {
   }
 });
 
-async function getAccountIds(itemId: string): Promise<string[]> {
-  const { listAccounts } = await import("../services/pluggy.js");
+// POST /api/pluggy/webhooks/register — register user webhooks pointing to our endpoint
+router.post("/webhooks/register", async (req: Request, res: Response) => {
   try {
-    const accounts = await listAccounts(itemId);
+    const user = req.user!;
+    const creds = await credsForUser(user.id);
+    if (!creds) {
+      res.status(400).json({ error: "Configure suas credenciais Pluggy nas Configurações primeiro" });
+      return;
+    }
+    const webhookUrl = pluggyWebhookUrl();
+    if (!webhookUrl) {
+      res.status(500).json({ error: "PLUGGY_WEBHOOK_URL não configurado no servidor" });
+      return;
+    }
+    const client = createPluggyClient(creds);
+    const secret = process.env.WEBHOOK_SECRET;
+    const headers = secret ? { "x-webhook-secret": secret } : undefined;
+
+    const results: Array<{ event: string; id?: string; error?: string }> = [];
+    for (const event of WEBHOOK_EVENTS) {
+      try {
+        const created = await client.createWebhook(event, webhookUrl, headers) as { id: string };
+        results.push({ event, id: created.id });
+      } catch (err) {
+        // Already registered (duplicate) — try to find the existing one
+        results.push({ event, error: (err as Error).message });
+      }
+    }
+    res.json({ ok: true, results });
+  } catch (err) {
+    console.error("[pluggy] register webhooks:", err);
+    res.status(500).json({ error: err instanceof PluggyError ? err.message : "Erro interno" });
+  }
+});
+
+async function getAccountIdsForConnection(itemId: string, userId: string): Promise<string[]> {
+  const conn = await prisma.bankConnection.findFirst({ where: { itemId, userId } });
+  if (!conn) return [];
+  const creds = await credsForUser(userId);
+  if (!creds) return [];
+  const client = createPluggyClient(creds);
+  try {
+    const accounts = await client.listAccounts(itemId);
     return accounts.map((a) => a.id);
   } catch {
     return [];

@@ -18,6 +18,8 @@ const SETTINGS_KEYS = [
   "discordToken",
   "telegramToken",
   "geminiApiKey",
+  "pluggyClientId",
+  "pluggyClientSecret",
 ] as const;
 
 router.get("/", async (req: Request, res: Response) => {

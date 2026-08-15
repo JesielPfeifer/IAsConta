@@ -19,20 +19,31 @@
 import { PrismaClient } from "@prisma/client";
 import { autoCategorize } from "../../parsers/categories.js";
 import {
-  listAccounts,
-  listBills,
-  listTransactions,
-  getItem,
-  isBankAccount,
+  createPluggyClient,
+  resolveCredentials,
   isCreditCardAccount,
+  isBankAccount,
   installmentGroupKey,
   pluggyCategoryToLocal,
+  type PluggyCredentials,
   type PluggyAccount,
   type PluggyTransaction,
   type PluggyBill,
 } from "./pluggy.js";
 
 const prisma = new PrismaClient();
+
+/** Resolves the Pluggy credentials for a user (own settings -> global env). */
+export async function resolveCredentialsForUser(
+  userId: string
+): Promise<PluggyCredentials | null> {
+  const settings = await prisma.userSettings.findUnique({ where: { userId } });
+  const userCreds =
+    settings?.pluggyClientId && settings?.pluggyClientSecret
+      ? { clientId: settings.pluggyClientId, clientSecret: settings.pluggyClientSecret }
+      : null;
+  return resolveCredentials(userCreds);
+}
 
 export interface SyncResult {
   itemId: string;
@@ -110,10 +121,22 @@ export async function syncItem(itemId: string, userId: string): Promise<SyncResu
     throw new Error(`Conexão Pluggy não encontrada para item ${itemId}`);
   }
 
+  const creds = await resolveCredentialsForUser(userId);
+  if (!creds) {
+    const err = "Pluggy não configurado para este usuário";
+    result.errors.push(err);
+    await prisma.bankConnection.update({
+      where: { id: connection.id },
+      data: { status: "ERROR", errorMessage: err, lastSyncAt: new Date() },
+    });
+    return result;
+  }
+  const client = createPluggyClient(creds);
+
   // 1. Item status from Pluggy
   let pluggyItem;
   try {
-    pluggyItem = await getItem(itemId);
+    pluggyItem = await client.getItem(itemId);
     result.status = pluggyItem.status;
   } catch (err) {
     result.errors.push(`Falha ao buscar item: ${(err as Error).message}`);
@@ -139,15 +162,15 @@ export async function syncItem(itemId: string, userId: string): Promise<SyncResu
   }
 
   // 2. Accounts
-  const accounts = await listAccounts(itemId);
+  const accounts = await client.listAccounts(itemId);
   result.accounts = accounts.length;
 
   for (const account of accounts) {
     try {
       if (isBankAccount(account)) {
-        await syncBankAccount(account, userId, result, pluggyItem.connector?.name);
+        await syncBankAccount(client, account, userId, result, pluggyItem.connector?.name);
       } else if (isCreditCardAccount(account)) {
-        await syncCreditCard(account, userId, result, pluggyItem.connector?.name);
+        await syncCreditCard(client, account, userId, result, pluggyItem.connector?.name);
       }
       // Other account types (investment, loan) are ignored for now
     } catch (err) {
@@ -172,12 +195,13 @@ export async function syncItem(itemId: string, userId: string): Promise<SyncResu
 // Bank accounts (checking/savings) -> plain transactions
 // ---------------------------------------------------------------
 async function syncBankAccount(
+  client: ReturnType<typeof createPluggyClient>,
   account: PluggyAccount,
   userId: string,
   result: SyncResult,
   connectorName?: string
 ): Promise<void> {
-  const transactions = await listTransactions(account.id);
+  const transactions = await client.listTransactions(account.id);
   const paymentMethod = normalizePaymentMethod(account, connectorName);
 
   for (const tx of transactions) {
@@ -241,19 +265,20 @@ async function syncBankAccount(
 // Credit card accounts -> faturas (Bills) + purchases (Transactions)
 // ---------------------------------------------------------------
 async function syncCreditCard(
+  client: ReturnType<typeof createPluggyClient>,
   account: PluggyAccount,
   userId: string,
   result: SyncResult,
   connectorName?: string
 ): Promise<void> {
   // --- Faturas (bills) ---
-  const bills = await listBills(account.id);
+  const bills = await client.listBills(account.id);
   for (const bill of bills) {
     await upsertBill(bill, account, userId, result);
   }
 
   // --- Transactions (purchases) ---
-  const transactions = await listTransactions(account.id);
+  const transactions = await client.listTransactions(account.id);
   const paymentMethod = normalizePaymentMethod(account, connectorName);
 
   for (const tx of transactions) {

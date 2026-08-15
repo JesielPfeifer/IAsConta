@@ -8,14 +8,22 @@
  *   2. POST /connect_token -> accessToken (30min, Connect Widget only — cannot read product data).
  *   3. All data endpoints use X-API-KEY header with the apiKey.
  *
+ * Multi-user: each IAsConta user may configure their OWN Pluggy credentials
+ * (clientId/clientSecret from dashboard.pluggy.ai) in the Settings page.
+ * `createPluggyClient()` returns an isolated client with its own API key cache,
+ * so one server instance can serve many Pluggy accounts. The module-level
+ * helpers (getPluggyClient) fall back to the global env credentials.
+ *
  * Item = one bank connection. Products: accounts, transactions, credit card bills (faturas).
  */
 import crypto from "crypto";
 
 const BASE_URL = "https://api.pluggy.ai";
 
-const CLIENT_ID = process.env.PLUGGY_CLIENT_ID as string;
-const CLIENT_SECRET = process.env.PLUGGY_CLIENT_SECRET as string;
+export interface PluggyCredentials {
+  clientId: string;
+  clientSecret: string;
+}
 
 export class PluggyError extends Error {
   code: number;
@@ -28,32 +36,43 @@ export class PluggyError extends Error {
 }
 
 // ---------------------------------------------------------------
-// API Key cache (expires after 2h per docs)
+// API Key cache per credential pair (expires after 2h per docs)
 // ---------------------------------------------------------------
-let cachedApiKey: string | null = null;
-let apiKeyExpiresAt = 0;
+const apiKeyCache = new Map<string, { apiKey: string; expiresAt: number }>();
 
-export function isPluggyConfigured(): boolean {
-  return Boolean(CLIENT_ID && CLIENT_SECRET);
+function credsKey(creds: PluggyCredentials): string {
+  return `${creds.clientId}:${creds.clientSecret}`;
 }
 
-export function getPluggyClientId(): string {
-  return CLIENT_ID;
+export function isPluggyConfigured(creds?: PluggyCredentials | null): boolean {
+  const c = creds || globalCredentials();
+  return Boolean(c?.clientId && c?.clientSecret);
 }
 
-export async function getApiKey(force = false): Promise<string> {
-  if (!isPluggyConfigured()) {
-    throw new PluggyError("Pluggy não configurado (PLUGGY_CLIENT_ID/SECRET ausentes)", 500);
-  }
+function globalCredentials(): PluggyCredentials | null {
+  const clientId = process.env.PLUGGY_CLIENT_ID as string;
+  const clientSecret = process.env.PLUGGY_CLIENT_SECRET as string;
+  return clientId && clientSecret ? { clientId, clientSecret } : null;
+}
+
+/** Returns the user's credentials when configured, otherwise the global env ones. */
+export function resolveCredentials(userCreds?: PluggyCredentials | null): PluggyCredentials | null {
+  if (userCreds?.clientId && userCreds?.clientSecret) return userCreds;
+  return globalCredentials();
+}
+
+export async function getApiKey(creds: PluggyCredentials, force = false): Promise<string> {
+  const key = credsKey(creds);
   const now = Date.now();
-  if (!force && cachedApiKey && now < apiKeyExpiresAt) {
-    return cachedApiKey;
+  const cached = apiKeyCache.get(key);
+  if (!force && cached && now < cached.expiresAt) {
+    return cached.apiKey;
   }
 
   const res = await fetch(`${BASE_URL}/auth`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ clientId: CLIENT_ID, clientSecret: CLIENT_SECRET }),
+    body: JSON.stringify({ clientId: creds.clientId, clientSecret: creds.clientSecret }),
   });
   const body = await res.json().catch(() => ({}));
 
@@ -65,43 +84,168 @@ export async function getApiKey(force = false): Promise<string> {
     );
   }
 
-  cachedApiKey = body.apiKey as string;
   // Renew 5 minutes before the 2h expiry
-  apiKeyExpiresAt = now + (2 * 60 - 5) * 60 * 1000;
-  return cachedApiKey;
-}
-
-async function api<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
-  const apiKey = await getApiKey();
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "X-API-KEY": apiKey,
-      ...(options.headers || {}),
-    },
-  });
-
-  // Token may have expired mid-flight -> retry once with a forced refresh
-  if (res.status === 401 && retry) {
-    await getApiKey(true);
-    return api<T>(path, options, false);
-  }
-
-  const body = await res.json().catch(() => ({}));
-
-  if (!res.ok) {
-    throw new PluggyError(
-      body?.message || `Pluggy API error ${res.status}`,
-      res.status,
-      body?.codeDescription
-    );
-  }
-  return body as T;
+  apiKeyCache.set(key, { apiKey: body.apiKey, expiresAt: now + (2 * 60 - 5) * 60 * 1000 });
+  return body.apiKey;
 }
 
 // ---------------------------------------------------------------
-// Connect Token (for the Connect Widget — frontend)
+// Client factory — every function bound to a specific credential pair
+// ---------------------------------------------------------------
+export function createPluggyClient(creds: PluggyCredentials) {
+  async function api<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
+    const apiKey = await getApiKey(creds);
+    const res = await fetch(`${BASE_URL}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-KEY": apiKey,
+        ...(options.headers || {}),
+      },
+    });
+
+    // Token may have expired mid-flight -> retry once with a forced refresh
+    if (res.status === 401 && retry) {
+      await getApiKey(creds, true);
+      return api<T>(path, options, false);
+    }
+
+    const body = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      throw new PluggyError(
+        body?.message || `Pluggy API error ${res.status}`,
+        res.status,
+        body?.codeDescription
+      );
+    }
+    return body as T;
+  }
+
+  return {
+    // --- Connect Token (for the Connect Widget — frontend) ---
+    async createConnectToken(options: ConnectTokenOptions = {}): Promise<string> {
+      const payload: Record<string, unknown> = {};
+      if (options.itemId) payload.itemId = options.itemId;
+      const opts: Record<string, unknown> = {};
+      if (options.clientUserId) opts.clientUserId = options.clientUserId;
+      if (options.webhookUrl) opts.webhookUrl = options.webhookUrl;
+      if (options.avoidDuplicates) opts.avoidDuplicates = true;
+      if (Object.keys(opts).length > 0) payload.options = opts;
+
+      const body = await api<{ accessToken: string }>("/connect_token", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      return body.accessToken;
+    },
+
+    // --- Connectors (financial institutions) ---
+    async listConnectors(search?: string, sandbox = false): Promise<PluggyConnector[]> {
+      const params = new URLSearchParams();
+      if (search) params.set("search", search);
+      if (sandbox) params.set("sandbox", "true");
+      const qs = params.toString();
+      const body = await api<{ results: PluggyConnector[] }>(
+        `/connectors${qs ? `?${qs}` : ""}`
+      );
+      return body.results || [];
+    },
+
+    // --- Items (bank connections) ---
+    getItem: (itemId: string) => api<PluggyItem>(`/items/${itemId}`),
+    updateItem: (itemId: string) => api<PluggyItem>(`/items/${itemId}`, { method: "POST" }),
+
+    async createItem(params: CreateItemParams): Promise<PluggyItem> {
+      const payload: Record<string, unknown> = {
+        connectorId: params.connectorId,
+        parameters: params.credentials,
+      };
+      if (params.webhookUrl) payload.webhookUrl = params.webhookUrl;
+      if (params.clientUserId) payload.clientUserId = params.clientUserId;
+      if (params.products) payload.products = params.products;
+      return api<PluggyItem>("/items", { method: "POST", body: JSON.stringify(payload) });
+    },
+
+    deleteItem: (itemId: string) => api<void>(`/items/${itemId}`, { method: "DELETE" }),
+    sendItemMFA: (itemId: string, mfa: string) =>
+      api<PluggyItem>(`/items/${itemId}/mfa`, {
+        method: "POST",
+        body: JSON.stringify({ mfa }),
+      }),
+
+    // --- Accounts ---
+    listAccounts: (itemId: string) =>
+      api<{ results: PluggyAccount[] }>(`/accounts?itemId=${itemId}`).then((b) => b.results || []),
+
+    // --- Transactions (v2 cursor-based) ---
+    async listTransactions(
+      accountId: string,
+      dateFrom?: string,
+      dateTo?: string
+    ): Promise<PluggyTransaction[]> {
+      const all: PluggyTransaction[] = [];
+      let after: string | null = null;
+
+      do {
+        const params = new URLSearchParams({ accountId });
+        if (dateFrom) params.set("dateFrom", dateFrom);
+        if (dateTo) params.set("dateTo", dateTo);
+        if (after) params.set("after", after);
+
+        const body = await api<{ results: PluggyTransaction[]; next: string | null }>(
+          `/v2/transactions?${params.toString()}`
+        );
+        all.push(...(body.results || []));
+
+        // 'next' is a ready-to-use query string; extract the 'after' param from it
+        after = null;
+        if (body.next) {
+          const nextParams = new URLSearchParams(body.next.replace(/^\?/, ""));
+          after = nextParams.get("after");
+        }
+      } while (after);
+
+      return all;
+    },
+
+    // --- Credit card bills (faturas) ---
+    listBills: (accountId: string) =>
+      api<{ results: PluggyBill[] }>(`/bills?accountId=${accountId}`).then((b) => b.results || []),
+
+    // --- Webhooks ---
+    async createWebhook(event: string, url: string, headers?: Record<string, string>): Promise<unknown> {
+      const payload: Record<string, unknown> = { event, url };
+      if (headers && Object.keys(headers).length > 0) payload.headers = headers;
+      return api("/webhooks", { method: "POST", body: JSON.stringify(payload) });
+    },
+
+    async listWebhooks(): Promise<Array<{ id: string; event: string; url: string; disabledAt?: string | null }>> {
+      const body = await api<{ results: Array<{ id: string; event: string; url: string; disabledAt?: string | null }> }>("/webhooks");
+      return body.results || [];
+    },
+
+    async deleteWebhook(webhookId: string): Promise<void> {
+      await api(`/webhooks/${webhookId}`, { method: "DELETE" });
+    },
+  };
+}
+
+export type PluggyClient = ReturnType<typeof createPluggyClient>;
+
+// ---------------------------------------------------------------
+// Module-level helpers (global env credentials)
+// ---------------------------------------------------------------
+const globalClient: PluggyClient | null = globalCredentials()
+  ? createPluggyClient(globalCredentials() as PluggyCredentials)
+  : null;
+
+export function getGlobalPluggyClient(): PluggyClient | null {
+  return globalClient;
+}
+
+// ---------------------------------------------------------------
+// Connect Token options
 // ---------------------------------------------------------------
 export interface ConnectTokenOptions {
   clientUserId?: string;
@@ -110,24 +254,8 @@ export interface ConnectTokenOptions {
   avoidDuplicates?: boolean;
 }
 
-export async function createConnectToken(options: ConnectTokenOptions = {}): Promise<string> {
-  const payload: Record<string, unknown> = {};
-  if (options.itemId) payload.itemId = options.itemId;
-  const opts: Record<string, unknown> = {};
-  if (options.clientUserId) opts.clientUserId = options.clientUserId;
-  if (options.webhookUrl) opts.webhookUrl = options.webhookUrl;
-  if (options.avoidDuplicates) opts.avoidDuplicates = true;
-  if (Object.keys(opts).length > 0) payload.options = opts;
-
-  const body = await api<{ accessToken: string }>("/connect_token", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-  return body.accessToken;
-}
-
 // ---------------------------------------------------------------
-// Connectors (financial institutions)
+// Connectors
 // ---------------------------------------------------------------
 export interface PluggyConnector {
   id: number;
@@ -140,19 +268,8 @@ export interface PluggyConnector {
   products?: string[];
 }
 
-export async function listConnectors(search?: string, sandbox = false): Promise<PluggyConnector[]> {
-  const params = new URLSearchParams();
-  if (search) params.set("search", search);
-  if (sandbox) params.set("sandbox", "true");
-  const qs = params.toString();
-  const body = await api<{ results: PluggyConnector[] }>(
-    `/connectors${qs ? `?${qs}` : ""}`
-  );
-  return body.results || [];
-}
-
 // ---------------------------------------------------------------
-// Items (bank connections)
+// Items
 // ---------------------------------------------------------------
 export interface PluggyItem {
   id: string;
@@ -165,14 +282,7 @@ export interface PluggyItem {
   nextAutoSyncAt?: string | null;
   error?: { code?: string; message?: string } | null;
   products?: string[];
-}
-
-export async function getItem(itemId: string): Promise<PluggyItem> {
-  return api<PluggyItem>(`/items/${itemId}`);
-}
-
-export async function updateItem(itemId: string): Promise<PluggyItem> {
-  return api<PluggyItem>(`/items/${itemId}`, { method: "POST" });
+  executionStatus?: string | null;
 }
 
 export interface CreateItemParams {
@@ -181,28 +291,6 @@ export interface CreateItemParams {
   webhookUrl?: string;
   clientUserId?: string;
   products?: string[];
-}
-
-export async function createItem(params: CreateItemParams): Promise<PluggyItem> {
-  const payload: Record<string, unknown> = {
-    connectorId: params.connectorId,
-    parameters: params.credentials,
-  };
-  if (params.webhookUrl) payload.webhookUrl = params.webhookUrl;
-  if (params.clientUserId) payload.clientUserId = params.clientUserId;
-  if (params.products) payload.products = params.products;
-  return api<PluggyItem>("/items", { method: "POST", body: JSON.stringify(payload) });
-}
-
-export async function deleteItem(itemId: string): Promise<void> {
-  await api(`/items/${itemId}`, { method: "DELETE" });
-}
-
-export async function sendItemMFA(itemId: string, mfa: string): Promise<PluggyItem> {
-  return api<PluggyItem>(`/items/${itemId}/mfa`, {
-    method: "POST",
-    body: JSON.stringify({ mfa }),
-  });
 }
 
 // ---------------------------------------------------------------
@@ -233,13 +321,8 @@ export interface PluggyAccount {
   } | null;
 }
 
-export async function listAccounts(itemId: string): Promise<PluggyAccount[]> {
-  const body = await api<{ results: PluggyAccount[] }>(`/accounts?itemId=${itemId}`);
-  return body.results || [];
-}
-
 // ---------------------------------------------------------------
-// Transactions (v2 cursor-based)
+// Transactions
 // ---------------------------------------------------------------
 export interface PluggyCreditCardMetadata {
   installmentNumber?: number;
@@ -269,37 +352,6 @@ export interface PluggyTransaction {
   merchant?: unknown | null;
   createdAt?: string;
   updatedAt?: string;
-}
-
-export async function listTransactions(
-  accountId: string,
-  dateFrom?: string,
-  dateTo?: string
-): Promise<PluggyTransaction[]> {
-  const all: PluggyTransaction[] = [];
-  let after: string | null = null;
-  const pageSize = 500;
-
-  do {
-    const params = new URLSearchParams({ accountId });
-    if (dateFrom) params.set("dateFrom", dateFrom);
-    if (dateTo) params.set("dateTo", dateTo);
-    if (after) params.set("after", after);
-
-    const body = await api<{ results: PluggyTransaction[]; next: string | null }>(
-      `/v2/transactions?${params.toString()}`
-    );
-    all.push(...(body.results || []));
-
-    // 'next' is a ready-to-use query string; extract the 'after' param from it
-    after = null;
-    if (body.next) {
-      const nextParams = new URLSearchParams(body.next.replace(/^\?/, ""));
-      after = nextParams.get("after");
-    }
-  } while (after);
-
-  return all;
 }
 
 // ---------------------------------------------------------------
@@ -334,20 +386,14 @@ export interface PluggyBill {
   payments: PluggyBillPayment[];
 }
 
-export async function listBills(accountId: string): Promise<PluggyBill[]> {
-  const body = await api<{ results: PluggyBill[] }>(`/bills?accountId=${accountId}`);
-  return body.results || [];
-}
-
 // ---------------------------------------------------------------
-// Helpers
+// Pure helpers (no credentials needed)
 // ---------------------------------------------------------------
 /** Deterministic group id for installments of the same purchase (Pluggy has no group id). */
 export function installmentGroupKey(tx: PluggyTransaction): string {
   const meta = tx.creditCardMetadata || {};
   const total = meta.totalInstallments || 1;
-  const base =
-    `${tx.description}|${Math.abs(meta.totalAmount ?? tx.amount)}|${total}`;
+  const base = `${tx.description}|${Math.abs(meta.totalAmount ?? tx.amount)}|${total}`;
   return `pluggy-${crypto.createHash("md5").update(base).digest("hex").slice(0, 16)}`;
 }
 

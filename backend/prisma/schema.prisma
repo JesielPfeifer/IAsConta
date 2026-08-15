@@ -120,6 +120,8 @@ model UserSettings {
   discordToken String?
   telegramToken String?
   geminiApiKey String?
+  pluggyClientId String?
+  pluggyClientSecret String?
   failedLoginAttempts Int    @default(0)
   lockedUntil         DateTime?
   updatedAt  DateTime @updatedAt
