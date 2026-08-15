@@ -31,6 +31,7 @@ interface CreditCardTx {
   paymentMethod: string;
   totalInstallments: number;
   currentInstallment: number;
+  installmentAmount?: number;
 }
 
 export default function Dashboard() {

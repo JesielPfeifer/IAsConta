@@ -44,7 +44,7 @@ router.post("/", async (req: Request, res: Response) => {
 
     const waUser = await prisma.whatsAppUser.upsert({
       where: { phone: data.phone },
-      create: { phone: data.phone, userId: user.id, isActive: true },
+      create: { phone: data.phone, userId: user.id, isActive: true, instanceName: `wa-${user.id}` },
       update: { userId: user.id, isActive: true },
     });
 

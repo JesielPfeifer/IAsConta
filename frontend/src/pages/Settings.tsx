@@ -1,6 +1,7 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { Cog, Save, Key, Users, Bot, MessageCircle } from 'lucide-react';
 import { api } from '../api/client';
+import WhatsAppInstanceCard from '../components/WhatsAppInstanceCard';
 
 interface UserSettings {
   groqApiKey: string;
@@ -128,6 +129,8 @@ export default function Settings() {
             placeholder="bot-api-key"
           />
         </section>
+
+        <WhatsAppInstanceCard />
 
         <section className="bg-gray-900/50 border border-white/10 rounded-2xl p-6 space-y-4">
           <SectionHeader icon={Users} title="Integrantes" />

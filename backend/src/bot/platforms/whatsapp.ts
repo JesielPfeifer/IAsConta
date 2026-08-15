@@ -92,24 +92,8 @@ async function ensureInstance(): Promise<void> {
       if (exists) return;
     }
 
-    const createUrl = `${apiUrl}/instance/create`;
-    const createRes = await fetch(createUrl, {
-      method: 'POST',
-      headers: await headers(),
-      body: JSON.stringify({
-        instanceName: INSTANCE_NAME,
-        token: INSTANCE_NAME,
-        qrcode: true,
-        integration: 'WHATSAPP-BAILEYS',
-      }),
-    });
-
-    if (createRes.ok) {
-      console.log(`[whatsapp] Instance "${INSTANCE_NAME}" created`);
-    } else {
-      const err = await createRes.text();
-      console.error(`[whatsapp] Failed to create instance: ${err}`);
-    }
+    // Criação automática de instância fixa DESATIVADA.
+    // Cada usuário cria a própria instância via POST /api/whatsapp-instance (QR code na UI).
   } catch (err) {
     console.error('[whatsapp] ensureInstance error:', err);
   }
@@ -148,7 +132,8 @@ export async function disconnectInstance(): Promise<boolean> {
 }
 
 // Cache for group list — refreshed on startup and every 10 minutes
-let groupCache: { groups: any[]; timestamp: number } | null = null;
+// Cache de grupos por instância (cada usuário tem os próprios grupos)
+const groupCacheByInstance = new Map<string, { groups: any[]; timestamp: number }>();
 const GROUP_CACHE_TTL = 600_000; // 10 minutes
 
 // Pre-fetch groups on startup
@@ -160,7 +145,7 @@ async function refreshGroupCache(): Promise<void> {
     if (res.ok) {
       const groups = await res.json();
       if (Array.isArray(groups)) {
-        groupCache = { groups, timestamp: Date.now() };
+        groupCacheByInstance.set(INSTANCE_NAME, { groups, timestamp: Date.now() });
         console.log(`[whatsapp] Group cache loaded: ${groups.length} groups`);
       }
     }
@@ -172,20 +157,21 @@ async function refreshGroupCache(): Promise<void> {
 // Refresh cache periodically
 setInterval(refreshGroupCache, GROUP_CACHE_TTL);
 
-export async function findGroupByName(groupName: string): Promise<{ id: string; name: string } | null> {
+export async function findGroupByName(groupName: string, instanceName: string = INSTANCE_NAME): Promise<{ id: string; name: string } | null> {
   const url = await getEvoApiUrl();
   const h = await headers();
   
-  // Use cache if available and fresh
+  // Cache POR INSTÂNCIA (cada usuário busca nos próprios grupos)
   let groups: any[];
-  if (groupCache && (Date.now() - groupCache.timestamp) < GROUP_CACHE_TTL) {
-    groups = groupCache.groups;
+  const cached = groupCacheByInstance.get(instanceName);
+  if (cached && (Date.now() - cached.timestamp) < GROUP_CACHE_TTL) {
+    groups = cached.groups;
   } else {
-    const res = await fetch(`${url}/group/fetchAllGroups/${INSTANCE_NAME}?getParticipants=false`, { method: 'GET', headers: h });
+    const res = await fetch(`${url}/group/fetchAllGroups/${instanceName}?getParticipants=false`, { method: 'GET', headers: h });
     if (!res.ok) return null;
     groups = await res.json();
     if (Array.isArray(groups)) {
-      groupCache = { groups, timestamp: Date.now() };
+      groupCacheByInstance.set(instanceName, { groups, timestamp: Date.now() });
     }
   }
   const found = Array.isArray(groups) ? groups.find((g: any) =>
