@@ -244,26 +244,34 @@ export async function handleFinancialCommand(
       if (!h) return { handled: true, message: 'Erro ao calcular a saúde financeira.' };
 
       const brl = (v: number) => `R$${v.toFixed(2).replace('.', ',')}`;
+      const monthName = (offset: number) => {
+        const d = new Date();
+        d.setDate(1);
+        d.setMonth(d.getMonth() + offset);
+        return d.toLocaleDateString('pt-BR', { month: 'long' }).replace(/^./, (c) => c.toUpperCase());
+      };
+
       let msg = `🩺 *Saúde Financeira do Casal*\n\n`;
       msg += `📥 *Renda mensal:* ${brl(h.monthlyIncome)}\n`;
-      if (h.faturasTotal > 0) msg += `💳 *Faturas do mês:* ${brl(h.faturasTotal)}\n`;
-      msg += `🔒 *Compromissos:* ${brl(h.commitments)}\n`;
-      msg += `💵 *Sobra mensal:* ${brl(h.leftover)} (${h.leftoverPercent}% da renda)\n\n`;
+      msg += `📅 *${monthName(0)}:* compromissos ${brl(h.commitments)} → sobra ${brl(h.leftover)} (${h.leftoverPercent}%)\n`;
+      msg += `🔮 *${monthName(1)} (previsão):* compromissos ${brl(h.nextCommitments)} → sobra ${brl(h.nextLeftover)} (${h.nextLeftoverPercent}%)\n\n`;
 
-      const emoji = h.leftoverPercent >= 30 ? '🟢' : h.leftoverPercent >= 10 ? '🟡' : '🔴';
-      msg += `${emoji} ${h.leftoverPercent >= 30 ? 'Saudável' : h.leftoverPercent >= 10 ? 'Atenção' : 'Risco'}: sobra ${h.leftoverPercent}% da renda.\n\n`;
+      const pct = h.nextLeftoverPercent;
+      const emoji = pct >= 30 ? '🟢' : pct >= 10 ? '🟡' : '🔴';
+      msg += `${emoji} ${pct >= 30 ? 'Saudável' : pct >= 10 ? 'Atenção' : 'Risco'}: previsão de sobra ${pct}% da renda no próximo mês.\n\n`;
 
       if (h.endingSoon.length > 0) {
-        msg += `🎯 *Parcelas que estão acabando (últimas ${h.endingSoonCount} compras):*\n`;
+        msg += `🎯 *Parcelas que terminam nos próximos 3 meses (${h.endingSoonCount}):*\n`;
         for (const p of h.endingSoon.slice(0, 6)) {
           const name = p.description.length > 28 ? p.description.slice(0, 26) + '…' : p.description;
-          msg += `• ${name} — ${p.currentInstallment}/${p.totalInstallments} (${brl(p.monthlyAmount)}/mês)\n`;
+          const endMonth = new Date(p.endsAt).toLocaleDateString('pt-BR', { month: 'short' });
+          msg += `• ${name} — ${p.currentInstallment}/${p.totalInstallments} (acaba ${endMonth}, ${brl(p.monthlyAmount)}/mês)\n`;
         }
-        msg += `\n💰 Liberam ${brl(h.endingSoonMonthly)}/mês quando terminarem!\n`;
+        msg += `\n💰 Liberam ${brl(h.endingSoonMonthly)}/mês até ${monthName(2)}!\n`;
       }
 
       if (h.openPurchasesCount > 0) {
-        msg += `\n📦 Parcelas abertas: ${h.openPurchasesCount} compras (${brl(h.openPurchasesTotal)} a pagar no total).`;
+        msg += `\n📦 Parcelas abertas no horizonte: ${h.openPurchasesCount} compras (${brl(h.openPurchasesTotal)} a pagar).`;
       }
       return { handled: true, message: msg };
     } catch (err) {

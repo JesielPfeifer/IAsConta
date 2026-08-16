@@ -302,23 +302,24 @@ router.get("/last-7-days", async (req: Request, res: Response) => {
 });
 
 // GET /api/bot/dashboard/financial-health — couple's financial health:
-// fixed monthly income, current commitments (faturas + open installments),
-// leftover after commitments, and installments about to finish (which free
-// up money in the coming months).
+// fixed monthly income, current month commitments, NEXT month forecast,
+// and installments/faturas ending within the next 3 months.
 router.get("/financial-health", async (req: Request, res: Response) => {
   try {
     const user = await getBotUser();
-    const { start, end } = getCurrentMonthRange();
-    // Parcelas "atuais": a de cada compra com data até o FIM do mês corrente.
-    // Parcelas futuras (datas em meses seguintes) existem no banco mas NÃO
-    // são a parcela atual — usar a mais avançada com data <= endOfMonth.
-    const endOfMonth = new Date(end);
+    const now = new Date();
+    const { start, end } = getCurrentMonthRange(); // current month
+    const nextStart = new Date(end); // 1st of next month
+    const nextEnd = new Date(nextStart.getFullYear(), nextStart.getMonth() + 1, 1);
+    // Horizon: 3 months ahead (installments ending within this window)
+    const horizon3 = new Date(nextStart.getFullYear(), nextStart.getMonth() + 3, 1);
 
-    const [fixedIncomes, faturas, installments, cardMonthTx] = await Promise.all([
+    const [fixedIncomes, faturasMonth, faturasNext, installments, cardMonthTx] = await Promise.all([
       prisma.fixedIncome.findMany({
         where: { userId: user.id },
         select: { name: true, amount: true, person: true },
       }),
+      // Faturas due in the current month
       prisma.bill.findMany({
         where: {
           userId: user.id,
@@ -327,16 +328,25 @@ router.get("/financial-health", async (req: Request, res: Response) => {
         },
         select: { name: true, amount: true, dueDate: true },
       }),
-      // Open installments (parcelas) — grouped by purchase. Amount stored is
-      // the monthly parcel value; remaining = parcels yet to be paid.
+      // Faturas due in the NEXT month (forecast)
+      prisma.bill.findMany({
+        where: {
+          userId: user.id,
+          dueDate: { gte: nextStart, lt: nextEnd },
+          isPaid: false,
+        },
+        select: { name: true, amount: true, dueDate: true },
+      }),
+      // Installments from the current month up to 3 months ahead. Future
+      // parcels already exist in the DB (Meu Pluggy pre-creates them), so
+      // the group's highest parcel (MAX currentInstallment) tells the
+      // current position and the last parcel's date tells when it ends.
       prisma.transaction.findMany({
         where: {
           userId: user.id,
           source: "PLUGGY",
           totalInstallments: { gt: 1 },
-          // Only parcels whose date is within the current month or earlier —
-          // future parcels (next months) are not the "current" one.
-          date: { lt: endOfMonth },
+          date: { gte: start, lt: horizon3 },
         },
         select: {
           description: true,
@@ -364,11 +374,11 @@ router.get("/financial-health", async (req: Request, res: Response) => {
       }),
     ]);
 
-    // Group ALL installments by purchase — the group is "open" only when its
-    // HIGHEST installment (MAX currentInstallment) is still below the total.
-    // Filtering by individual rows (current < total) is wrong: a purchase
-    // whose last parcel was already charged (e.g. SHOPEE 2/2 on 14/08) would
-    // still show the 1/2 row as "open".
+    // Group ALL installments by purchase. A group is "open" only when its
+    // HIGHEST installment (MAX currentInstallment within the current month)
+    // is still below the total. Filtering by individual rows is wrong: a
+    // purchase whose last parcel was already charged would still show the
+    // 1/2 row as "open".
     const groups = new Map<string, (typeof installments)[number][]>();
     for (const tx of installments) {
       const key = tx.installmentGroupId || `${tx.description}|${tx.paymentMethod}`;
@@ -379,11 +389,29 @@ router.get("/financial-health", async (req: Request, res: Response) => {
 
     const openPurchases = Array.from(groups.values())
       .map((txs) => {
-        // Latest installment row of the purchase (highest currentInstallment)
-        const latest = txs.reduce((a, b) =>
+        // Current position: highest parcel with date within the current month
+        const currentMonthTxs = txs.filter((t) => t.date < end);
+        const latest = currentMonthTxs.reduce((a, b) =>
           b.currentInstallment > a.currentInstallment ? b : a
         );
         const remaining = latest.totalInstallments - latest.currentInstallment;
+        // When the purchase ends: the parcel with current === total (exists
+        // in DB with a future date) or estimate latest date + remaining.
+        const lastParcel = txs.find(
+          (t) => t.currentInstallment === t.totalInstallments
+        );
+        const endsAt = lastParcel
+          ? lastParcel.date
+          : new Date(
+              latest.date.getFullYear(),
+              latest.date.getMonth() + remaining,
+              latest.date.getDate()
+            );
+        // Parcels due within the 3-month horizon (future parcels in DB)
+        const horizonParcels = txs.filter(
+          (t) => t.date >= end && t.date < horizon3
+        );
+        const horizonTotal = horizonParcels.reduce((s, t) => s + t.amount, 0);
         return {
           description: latest.description,
           paymentMethod: latest.paymentMethod,
@@ -392,46 +420,71 @@ router.get("/financial-health", async (req: Request, res: Response) => {
           totalInstallments: latest.totalInstallments,
           monthlyAmount: latest.amount,
           remaining,
-          remainingTotal: latest.amount * remaining,
+          // Total still owed within the 3-month window only
+          remainingTotal: horizonTotal,
+          endsAt,
         };
       })
       // Open = highest parcel charged is still below the total
       .filter((p) => p.remaining > 0)
-      .sort((a, b) => a.remaining - b.remaining);
+      .sort((a, b) => a.endsAt.getTime() - b.endsAt.getTime());
 
-    // Installments finishing soon: 1-2 parcels left AND the purchase is well
-    // underway (already paid >= 3 parcels) — a fresh 1/2 purchase is NOT
-    // "ending", it just started.
-    const endingSoon = openPurchases.filter(
-      (p) => p.remaining <= 2 && p.currentInstallment >= 3
-    );
+    // Ending within the next 3 months (last parcel date inside the window)
+    const endingSoon = openPurchases.filter((p) => p.endsAt < horizon3);
     const endingSoonMonthly = endingSoon.reduce((s, p) => s + p.monthlyAmount, 0);
 
     const monthlyIncome = fixedIncomes.reduce((s, i) => s + i.amount, 0);
-    const faturasTotal = faturas.reduce((s, b) => s + b.amount, 0);
+    const faturasMonthTotal = faturasMonth.reduce((s, b) => s + b.amount, 0);
+    const faturasNextTotal = faturasNext.reduce((s, b) => s + b.amount, 0);
     // Card purchases of the current month not yet in a fatura (open cycle)
     const cardMonthTotal = cardMonthTx.reduce((s, t) => s + t.amount, 0);
-    // Monthly commitment: faturas of the month + open card cycle purchases +
-    // monthly parcels of NON-card purchases (checking-account installments
-    // like "Tio jairo" are paid directly each month).
-    const nonCardMonthlyParcels = openPurchases
-      .filter((p) => !p.isCreditCard)
+    // Non-card installments (checking-account, e.g. "Tio jairo") paid
+    // directly each month — current month and next month amounts.
+    const nonCardMonth = openPurchases
+      .filter((p) => !p.isCreditCard && p.endsAt >= start)
       .reduce((s, p) => s + p.monthlyAmount, 0);
-    const commitments = faturasTotal + cardMonthTotal + nonCardMonthlyParcels;
+    const nonCardNext = openPurchases
+      .filter((p) => !p.isCreditCard && p.remaining > 0)
+      .reduce((s, p) => s + p.monthlyAmount, 0);
+
+    // Current month: faturas + open card cycle + non-card parcels
+    const commitments = faturasMonthTotal + cardMonthTotal + nonCardMonth;
     const leftover = monthlyIncome - commitments;
+
+    // Next month forecast: known faturas + non-card parcels still running +
+    // card parcels due next month (they will form the next fatura; faturas
+    // of next month already cover card parcels when they exist).
+    const cardParcelsNext = openPurchases
+      .filter((p) => p.isCreditCard && p.remaining > 0)
+      .reduce((s, p) => s + p.monthlyAmount, 0);
+    const nextForecast = faturasNextTotal + cardParcelsNext + nonCardNext;
 
     res.json({
       monthlyIncome,
       monthlyIncomeByPerson: fixedIncomes,
-      faturas: faturas.map((f) => ({
+      // Current month
+      faturas: faturasMonth.map((f) => ({
         name: f.name,
         amount: f.amount,
         dueDate: f.dueDate,
       })),
-      faturasTotal,
+      faturasTotal: faturasMonthTotal,
+      cardMonthTotal,
       commitments,
       leftover,
       leftoverPercent: monthlyIncome > 0 ? Math.round((leftover / monthlyIncome) * 100) : 0,
+      // Next month forecast
+      nextFaturas: faturasNext.map((f) => ({
+        name: f.name,
+        amount: f.amount,
+        dueDate: f.dueDate,
+      })),
+      nextFaturasTotal: faturasNextTotal,
+      nextCommitments: nextForecast,
+      nextLeftover: monthlyIncome - nextForecast,
+      nextLeftoverPercent:
+        monthlyIncome > 0 ? Math.round(((monthlyIncome - nextForecast) / monthlyIncome) * 100) : 0,
+      // Installments (only within the 3-month window)
       openPurchases: openPurchases.slice(0, 15),
       openPurchasesCount: openPurchases.length,
       openPurchasesTotal: openPurchases.reduce((s, p) => s + p.remainingTotal, 0),
