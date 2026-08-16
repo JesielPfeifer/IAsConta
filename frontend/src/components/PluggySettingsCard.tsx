@@ -251,7 +251,7 @@ export default function PluggySettingsCard() {
           type="text"
           value={clientId}
           onChange={(e) => setClientId(e.target.value)}
-          placeholder="ex: 6a36d845-7644-45d9-..."
+          placeholder="ex: seu-client-id (dashboard.pluggy.ai)"
           className="w-full bg-white/[0.03] border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/30"
         />
       </div>
