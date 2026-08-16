@@ -363,7 +363,7 @@ router.post("/webhook", async (req: Request, res: Response) => {
   }
 
   const body = (req.body || {}) as Record<string, unknown>;
-  console.log("[pluggy-webhook] evento:", body.eventName, "item:", body.itemId);
+  console.log("[pluggy-webhook] evento:", body.event || body.eventName, "item:", body.itemId);
 
   try {
     const summary = await handlePluggyWebhook(body);

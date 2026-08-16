@@ -154,7 +154,7 @@ export function createPluggyClient(creds: PluggyCredentials) {
 
     // --- Items (bank connections) ---
     getItem: (itemId: string) => api<PluggyItem>(`/items/${itemId}`),
-    updateItem: (itemId: string) => api<PluggyItem>(`/items/${itemId}`, { method: "POST" }),
+    updateItem: (itemId: string) => api<PluggyItem>(`/items/${itemId}`, { method: "PATCH" }),
 
     async createItem(params: CreateItemParams): Promise<PluggyItem> {
       const payload: Record<string, unknown> = {

@@ -489,7 +489,9 @@ export async function syncAllForUser(userId: string): Promise<SyncResult[]> {
 
 /** Process a Pluggy webhook event: trigger a re-sync of the affected item. */
 export async function handlePluggyWebhook(body: Record<string, unknown>): Promise<string | null> {
-  const eventName = body.eventName as string | undefined;
+  // Pluggy sends "event" (e.g. "item/updated"); some legacy payloads used
+  // "eventName". Accept both.
+  const eventName = (body.event as string) || (body.eventName as string) || undefined;
   const itemId = (body.itemId as string) || (body.data as any)?.item?.id;
 
   if (!itemId) return null;
