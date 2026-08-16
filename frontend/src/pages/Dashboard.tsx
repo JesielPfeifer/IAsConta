@@ -386,7 +386,7 @@ export default function Dashboard() {
       {creditCardTx.length > 0 && (
         <SectionCard
           title="Cartao de Credito"
-          subtitle={`Total: ${formatCurrency(creditCardTotal)} | ${creditCardTx.length} transacoes parceladas`}
+          subtitle={`Total: ${formatCurrency(creditCardTotal)} | ${creditCardTx.length} compras no cartao`}
           icon={<CreditCard className="h-5 w-5 text-amber-400" />}
           iconBg="bg-amber-500/10"
         >

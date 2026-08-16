@@ -285,7 +285,7 @@ router.get("/credit-card-total", async (req: Request, res: Response) => {
         type: "EXPENSE",
         date: { gte: start, lt: end },
         OR: [
-          { paymentMethod: { in: ["NUBANK", "CAIXA", "CREDITO_3", "CREDITO_4", "CREDITO"] } },
+          { paymentMethod: { in: ["NUBANK", "CREDITO_3", "CREDITO_4", "CREDITO"] } },
           { isCreditCard: true },
         ],
       },
@@ -460,7 +460,7 @@ router.get("/credit-card-detail", async (req: Request, res: Response) => {
         type: "EXPENSE",
         date: { gte: start, lt: end },
         OR: [
-          { paymentMethod: { in: ["NUBANK", "CAIXA", "CREDITO_3", "CREDITO_4", "CREDITO"] } },
+          { paymentMethod: { in: ["NUBANK", "CREDITO_3", "CREDITO_4", "CREDITO"] } },
           { isCreditCard: true },
         ],
       },
