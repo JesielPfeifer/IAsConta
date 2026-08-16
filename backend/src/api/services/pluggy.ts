@@ -73,6 +73,8 @@ export async function getApiKey(creds: PluggyCredentials, force = false): Promis
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ clientId: creds.clientId, clientSecret: creds.clientSecret }),
+    // Never hang on a stalled Pluggy auth — fail fast and let the caller retry
+    signal: AbortSignal.timeout(15_000),
   });
   const body = await res.json().catch(() => ({}));
 
@@ -97,6 +99,8 @@ export function createPluggyClient(creds: PluggyCredentials) {
     const apiKey = await getApiKey(creds);
     const res = await fetch(`${BASE_URL}${path}`, {
       ...options,
+      // Bound every request — a stalled Pluggy endpoint must not block syncs forever
+      signal: options.signal || AbortSignal.timeout(20_000),
       headers: {
         "Content-Type": "application/json",
         "X-API-KEY": apiKey,
@@ -186,8 +190,25 @@ export function createPluggyClient(creds: PluggyCredentials) {
     ): Promise<PluggyTransaction[]> {
       const all: PluggyTransaction[] = [];
       let after: string | null = null;
+      // Fail explicitly instead of looping forever if Pluggy echoes a cursor
+      const seenCursors = new Set<string>();
+      const MAX_PAGES = 100;
 
       do {
+        if (after && seenCursors.has(after)) {
+          throw new PluggyError(
+            `Cursor cycle detectado ao paginar transações (cursor repetido: ${after})`,
+            500
+          );
+        }
+        if (after) seenCursors.add(after);
+        if (seenCursors.size > MAX_PAGES) {
+          throw new PluggyError(
+            `Paginação excedeu ${MAX_PAGES} páginas — abortando para evitar loop`,
+            500
+          );
+        }
+
         const params = new URLSearchParams({ accountId });
         if (dateFrom) params.set("dateFrom", dateFrom);
         if (dateTo) params.set("dateTo", dateTo);
@@ -396,10 +417,12 @@ export interface PluggyBill {
  * Deterministic group id for installments of the same purchase (Pluggy has no
  * group id). The description carries the parcel marker ("X/Y" suffix) which
  * differs per installment — strip it so all parcels of the same purchase map
- * to the same group. The account id and the ROUNDED parcel amount are part of
- * the key so two DIFFERENT purchases from the same store (e.g. two CAMPO BOM
- * orders in 10x) stay in separate groups, while cents-level differences
- * between parcels of the same purchase (fees) still group together.
+ * to the same group. The account id, the purchase date and the ROUNDED parcel
+ * amount are part of the key so two DIFFERENT purchases from the same store
+ * (e.g. two CAMPO BOM orders in 10x on the same day) still group together,
+ * while cents-level differences between parcels of the same purchase (fees)
+ * still group together. SHA-256 (MD5 was flagged by static analysis; this is
+ * not security-sensitive but SHA-256 silences the warning at no cost).
  */
 export function installmentGroupKey(
   tx: PluggyTransaction,
@@ -411,8 +434,9 @@ export function installmentGroupKey(
     .replace(/\s*\d{1,3}\s*\/\s*\d{1,3}\s*$/i, "")
     .trim();
   const roundedAmount = Math.round(Math.abs(meta.totalAmount ?? tx.amount));
-  const base = `${cleanDescription}|${total}|${roundedAmount}|${accountId || ""}`;
-  return `pluggy-${crypto.createHash("md5").update(base).digest("hex").slice(0, 16)}`;
+  const purchaseDate = meta.purchaseDate || tx.date || "";
+  const base = `${cleanDescription}|${total}|${roundedAmount}|${accountId || ""}|${purchaseDate}`;
+  return `pluggy-${crypto.createHash("sha256").update(base).digest("hex").slice(0, 16)}`;
 }
 
 /** Credit card account helper */

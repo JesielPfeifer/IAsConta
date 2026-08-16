@@ -47,7 +47,13 @@ router.post("/", async (req: Request, res: Response) => {
       data: { name: cleanName, type, userId: user.id },
     });
     res.status(201).json(created);
-  } catch (err) {
+  } catch (err: any) {
+    // Unique conflict on [userId, name] (P2002): a concurrent request created
+    // the same name — translate to 409 instead of a generic 500.
+    if (err?.code === "P2002") {
+      res.status(409).json({ error: "Já existe um método com esse nome" });
+      return;
+    }
     console.error("[payment-methods] create:", err);
     res.status(500).json({ error: "Erro interno" });
   }
@@ -92,7 +98,13 @@ router.put("/:id", async (req: Request, res: Response) => {
       data,
     });
     res.json(updated);
-  } catch (err) {
+  } catch (err: any) {
+    // Unique conflict on [userId, name] (P2002): a concurrent request renamed
+    // to the same name — translate to 409 instead of a generic 500.
+    if (err?.code === "P2002") {
+      res.status(409).json({ error: "Já existe um método com esse nome" });
+      return;
+    }
     console.error("[payment-methods] update:", err);
     res.status(500).json({ error: "Erro interno" });
   }

@@ -17,12 +17,11 @@ import userRoutes from "./api/routes/users.js";
 import chatRoutes from "./api/routes/chat.js";
 import whatsappRoutes from "./api/routes/whatsapp.js";
 import whatsappUserRoutes from "./api/routes/whatsapp-users.js";
-import whatsappInstanceRoutes from "./api/routes/whatsapp-instance.js";
-import settingsRoutes from "./api/routes/settings.js";
-import annualRoutes from "./api/routes/annual.js";
 import paymentMethodRoutes from "./api/routes/payment-methods.js";
 import fixedIncomeRoutes from "./api/routes/fixed-incomes.js";
 import pluggyRoutes from "./api/routes/pluggy.js";
+import settingsRoutes from "./api/routes/settings.js";
+import annualRoutes from "./api/routes/annual.js";
 import { startWhatsApp, sendMessage } from "./bot/platforms/whatsapp.js";
 import { startDiscord } from "./bot/platforms/discord.js";
 import { startTelegram } from "./bot/platforms/telegram.js";
@@ -60,13 +59,12 @@ app.use("/api/bot/dashboard", botDashboardRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/whatsapp", whatsappRoutes);
-app.use("/api/whatsapp-instance", whatsappInstanceRoutes);
 app.use("/api/whatsapp-users", whatsappUserRoutes);
-app.use("/api/settings", settingsRoutes);
-app.use("/api/annual", annualRoutes);
 app.use("/api/payment-methods", paymentMethodRoutes);
 app.use("/api/fixed-incomes", fixedIncomeRoutes);
 app.use("/api/pluggy", pluggyRoutes);
+app.use("/api/settings", settingsRoutes);
+app.use("/api/annual", annualRoutes);
 
 app.post("/api/parse/nubank", upload.single("file"), async (req, res) => {
   try {
@@ -97,23 +95,15 @@ app.post("/api/parse/caixa", upload.single("file"), async (req, res) => {
 app.post("/webhook/evolution", async (req, res) => {
   try {
     // Validate webhook secret — fail if not configured
+    const webhookSecret = req.headers["x-webhook-secret"] as string;
     const expectedSecret = process.env.WEBHOOK_SECRET;
     if (!expectedSecret) {
       console.error("[webhook] FATAL: WEBHOOK_SECRET not configured");
       res.status(500).json({ error: "Server misconfiguration" });
       return;
     }
-    // Evolution v2.3.7 pode enviar o secret em formatos diferentes:
-    // header x-webhook-secret, header apikey, ou query param
-    const webhookSecret = (req.headers["x-webhook-secret"] as string)
-      || (req.headers["apikey"] as string)
-      || (req.query.secret as string)
-      || "";
-    const secretOk = webhookSecret === expectedSecret
-      || webhookSecret.replace(/["']/g, "") === expectedSecret
-      || webhookSecret.includes(expectedSecret);
-    if (!secretOk) {
-      console.warn("[webhook] Invalid webhook secret, rejecting request");
+    if (webhookSecret !== expectedSecret) {
+      console.warn("[webhook] Invalid webhook secret, rejecting");
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
@@ -122,33 +112,10 @@ app.post("/webhook/evolution", async (req, res) => {
     const data = body?.data;
     if (!data) { res.sendStatus(200); return; }
 
-    const instanceName = body.instance || data.instance || "default";
-
-    // CONNECTION_UPDATE: quando conecta, captura o número real (ownerJid) e grava no vínculo
-    const eventName = body.event || "";
-    if (eventName.includes("connection.update") || (data?.instance?.state && !data?.key)) {
-      try {
-        const prismaConn = new PrismaClient();
-        const inst = await prismaConn.whatsAppUser.findFirst({ where: { instanceName, isActive: true } });
-        const ownerJid = data?.instance?.ownerJid || "";
-        if (inst && ownerJid && (!inst.phone || inst.phone !== ownerJid.split("@")[0])) {
-          await prismaConn.whatsAppUser.update({
-            where: { id: inst.id },
-            data: { phone: ownerJid.split("@")[0] },
-          });
-          console.log(`[webhook] Phone atualizado para instância ${instanceName}: ${ownerJid.split("@")[0]}`);
-        }
-        await prismaConn.$disconnect();
-      } catch (err) {
-        console.error("[webhook] Erro ao atualizar phone:", err);
-      }
-      res.sendStatus(200);
-      return;
-    }
-
     const isFromMe = data.key?.fromMe || false;
     const message = data.message || data.conversation || data.extendedTextMessage;
     const senderId = data.key?.remoteJid || data.remoteJid || "";
+    const instanceName = body.instance || data.instance || "default";
     const isGroup = senderId?.includes("@g.us");
     const senderName = data.pushName || data.senderName || "";
     const rawText = message?.conversation || message?.extendedTextMessage?.text || data.body?.message || "";
@@ -162,7 +129,7 @@ app.post("/webhook/evolution", async (req, res) => {
 
     const text = rawText.replace(/@contas/gi, "").trim();
 
-    // Identify user: resolve by instanceName from the webhook payload
+    // Identify user by instance name from webhook
     const prisma = new PrismaClient();
     let botUserId = '';
     

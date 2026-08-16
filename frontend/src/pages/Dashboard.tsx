@@ -76,12 +76,14 @@ export default function Dashboard() {
     return due.isAfter(monthStart.subtract(1, 'day')) && due.isBefore(monthEnd.add(1, 'day'));
   });
 
+  // Exclude bill-linked transactions: the summary counts the fatura (Bill)
+  // once, and showing the card purchases here too would double-display them.
   const variableExpenses = transactions.filter(
-    (t) => t.type === 'EXPENSE' && !t.isFixed
+    (t) => t.type === 'EXPENSE' && !t.isFixed && !t.billId
   );
   
   const fixedExpenses = transactions.filter(
-    (t) => t.type === 'EXPENSE' && t.isFixed
+    (t) => t.type === 'EXPENSE' && t.isFixed && !t.billId
   );
 
   if (loading) {

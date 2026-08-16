@@ -24,6 +24,8 @@ function parseNumber(input: string): number {
   let s = input.trim();
   if (s.includes(',') && s.includes('.')) s = s.replace(/\./g, '').replace(',', '.');
   else if (s.includes(',')) s = s.replace(',', '.');
+  // pt-BR thousands without decimals: "1.000" or "1.000.000" -> 1000/1000000
+  else if (/^\d{1,3}(?:\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
   const parsed = parseFloat(s);
   return isNaN(parsed) ? 0 : parsed;
 }
@@ -124,8 +126,13 @@ export default function FixedIncomesCard() {
   async function handleApply() {
     setApplying(true);
     try {
+      // Derive the month in LOCAL time: toISOString() is UTC and in Brazilian
+      // timezones the final hours of a month would send the NEXT month,
+      // creating records in the wrong month and changing the idempotency key.
+      const now = new Date();
+      const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       const result = await api<{ month: string; created: string[]; skipped: string[] }>(
-        `/api/fixed-incomes/apply?month=${new Date().toISOString().slice(0, 7)}`,
+        `/api/fixed-incomes/apply?month=${month}`,
         { method: 'POST', body: JSON.stringify({}) }
       );
       if (result.created.length > 0) {

@@ -53,6 +53,7 @@ model Transaction {
   isCreditCard       Boolean         @default(false)
   billId             String?         // Pluggy credit card bill id (fatura) this tx belongs to
   pluggyAccountId    String?         // Pluggy account id that originated this tx
+  totalAmount        Float?          // Total purchase value when paid in installments (amount = monthly parcel)
   userId      String
   user        User            @relation(fields: [userId], references: [id])
   createdAt   DateTime        @default(now())
@@ -146,11 +147,11 @@ model BankConnection {
 
 model WhatsAppUser {
   id           String   @id @default(uuid())
-  phone        String?  @unique
-  userId       String
+  phone        String?
+  instanceName String   @unique
+  userId       String   @unique
   user         User     @relation(fields: [userId], references: [id])
   isActive     Boolean  @default(true)
-  instanceName String   @unique
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }

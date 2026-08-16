@@ -164,6 +164,9 @@ export default function PluggySettingsCard() {
             setSyncMessage(`Conectado, mas sync falhou: ${err.message}`);
           }
           await loadConnections();
+          // Widget completed — always re-enable the connect button, even if
+          // onClose never fires.
+          setConnecting(false);
         },
         onClose: () => setConnecting(false),
         onError: (err: any) => {
@@ -271,8 +274,9 @@ export default function PluggySettingsCard() {
       </p>
 
       <div>
-        <label className="block text-sm font-medium text-gray-400 mb-1.5">Pluggy Client ID</label>
+        <label htmlFor="pluggy-client-id" className="block text-sm font-medium text-gray-400 mb-1.5">Pluggy Client ID</label>
         <input
+          id="pluggy-client-id"
           type="text"
           value={clientId}
           onChange={(e) => setClientId(e.target.value)}
@@ -282,8 +286,9 @@ export default function PluggySettingsCard() {
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-400 mb-1.5">Pluggy Client Secret</label>
+        <label htmlFor="pluggy-client-secret" className="block text-sm font-medium text-gray-400 mb-1.5">Pluggy Client Secret</label>
         <input
+          id="pluggy-client-secret"
           type="password"
           value={clientSecret}
           onChange={(e) => setClientSecret(e.target.value)}
@@ -404,6 +409,7 @@ export default function PluggySettingsCard() {
                             onClick={() => handleSync(conn)}
                             disabled={syncingId === conn.itemId}
                             title="Sincronizar agora"
+                            aria-label="Sincronizar agora"
                             className="p-2 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-gray-300 hover:text-white transition-all"
                           >
                             {syncingId === conn.itemId ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
@@ -411,6 +417,7 @@ export default function PluggySettingsCard() {
                           <button
                             onClick={() => handleRemove(conn)}
                             title="Remover conexão"
+                            aria-label="Remover conexão"
                             className="p-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-all"
                           >
                             <Trash2 className="w-4 h-4" />

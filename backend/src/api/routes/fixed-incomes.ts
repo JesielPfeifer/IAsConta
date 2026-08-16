@@ -134,6 +134,13 @@ router.post("/apply", async (req: Request, res: Response) => {
       return;
     }
     const [y, m] = month.split("-").map(Number);
+    // Reject calendar-invalid months (2026-00, 2026-13): Date.UTC would
+    // silently normalize them to another month and create incomes in the
+    // wrong reporting period.
+    if (y < 1970 || y > 9999 || m < 1 || m > 12) {
+      res.status(400).json({ error: "Mês deve estar no formato YYYY-MM" });
+      return;
+    }
     const start = new Date(Date.UTC(y, m - 1, 1));
     const end = new Date(Date.UTC(y, m, 1));
 
@@ -156,21 +163,31 @@ router.post("/apply", async (req: Request, res: Response) => {
       const category = await prisma.category.findFirst({
         where: { userId: user.id, name: { contains: "renda", mode: "insensitive" } },
       });
-      await prisma.transaction.create({
-        data: {
-          amount: income.amount,
-          type: "INCOME",
-          description: income.name,
-          date: new Date(Math.min(Date.now(), end.getTime() - 1)),
-          person: income.person as any,
-          isShared: income.person === "COUPLE",
-          source: "MANUAL",
-          isFixed: true,
-          categoryId: category?.id || null,
-          externalId,
-          userId: user.id,
-        },
-      });
+      try {
+        await prisma.transaction.create({
+          data: {
+            amount: income.amount,
+            type: "INCOME",
+            description: income.name,
+            date: new Date(Math.min(Date.now(), end.getTime() - 1)),
+            person: income.person as any,
+            isShared: income.person === "COUPLE",
+            source: "MANUAL",
+            isFixed: true,
+            categoryId: category?.id || null,
+            externalId,
+            userId: user.id,
+          },
+        });
+      } catch (err: any) {
+        // Unique conflict (P2002): a concurrent request applied this month
+        // first — treat as skipped instead of failing the whole batch.
+        if (err?.code === "P2002") {
+          skipped.push(income.name);
+          continue;
+        }
+        throw err;
+      }
       created.push(income.name);
     }
 

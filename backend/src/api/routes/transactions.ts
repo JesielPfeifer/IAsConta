@@ -17,16 +17,17 @@ const createTransactionSchema = z.object({
   date: z.string().datetime(),
   person: z.enum(["HUSBAND", "WIFE", "COUPLE"]).optional().nullable(),
   isShared: z.boolean().optional(),
-  source: z.enum(["MANUAL", "BOT", "NUBANK_CSV", "CAIXA_PDF", "PLUGGY"]).optional(),
+  // NOTE: source is limited to manual/bot/import origins on purpose — PLUGGY
+  // and the Pluggy-owned identity fields (externalId, billId, pluggyAccountId,
+  // isCreditCard) are server-controlled: only the Pluggy sync service may set
+  // them. A caller-controlled externalId would let a client hijack the
+  // dedupe key and make sync skip the real imported transaction.
+  source: z.enum(["MANUAL", "BOT", "NUBANK_CSV", "CAIXA_PDF"]).optional(),
   paymentMethod: z.string().optional().nullable(),
   totalInstallments: z.number().int().optional(),
   currentInstallment: z.number().int().optional(),
   installmentGroupId: z.string().optional(),
   isFixed: z.boolean().optional(),
-  externalId: z.string().optional().nullable(),
-  isCreditCard: z.boolean().optional(),
-  billId: z.string().optional().nullable(),
-  pluggyAccountId: z.string().optional().nullable(),
 });
 
 const updateTransactionSchema = z.object({
@@ -37,12 +38,11 @@ const updateTransactionSchema = z.object({
   date: z.string().datetime().optional(),
   person: z.enum(["HUSBAND", "WIFE", "COUPLE"]).optional().nullable(),
   isShared: z.boolean().optional(),
-  source: z.enum(["MANUAL", "BOT", "NUBANK_CSV", "CAIXA_PDF", "PLUGGY"]).optional(),
+  source: z.enum(["MANUAL", "BOT", "NUBANK_CSV", "CAIXA_PDF"]).optional(),
   paymentMethod: z.string().optional().nullable(),
   totalInstallments: z.number().int().optional(),
   currentInstallment: z.number().int().optional(),
   isFixed: z.boolean().optional(),
-  billId: z.string().optional().nullable(),
 });
 
 const botTransactionSchema = z.object({

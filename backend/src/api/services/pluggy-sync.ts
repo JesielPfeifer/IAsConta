@@ -131,7 +131,7 @@ function normalizePaymentMethod(account: PluggyAccount, connectorName?: string |
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .toUpperCase()
-      .replace(/\b(VISA|MASTERCARD|MASTER|ELO|HIPERCARD|AMEX|AMERICAN\s*EXPRESS|CREDITO|CREDIT|CARD|INTERNACIONAL|INTERNATIONAL|INFINITE|INFINITY|BLACK|PLATINUM|GOLD|SIGNATURE|CLASSIC|UNICLASS|PERSONALITE|PERSONALIZED|NACIONAL|NACIONAL\s*INTERNACIONAL|ESTILO|OURO|STANDARD|BASIC|BASICO)\b/g, "")
+      .replace(/\b(VISA|MASTERCARD|MASTER|ELO|HIPERCARD|AMEX|AMERICAN\s*EXPRESS|CREDITO|CREDIT|CARD|INTERNACIONAL|INTERNATIONAL|INFINITE|INFINITY|BLACK|PLATINUM|GOLD|SIGNATURE|CLASSIC|UNICLASS|PERSONALITE|PERSONALIZED|NACIONAL\s*INTERNACIONAL|NACIONAL|ESTILO|OURO|STANDARD|BASIC|BASICO)\b/g, "")
       .replace(/\s+/g, " ")
       .trim();
     const name = cleaned.replace(/\s+/g, "_");
@@ -176,12 +176,17 @@ function isCreditCardBillPayment(description: string): boolean {
 /**
  * Bank-account transaction that pays a credit card fatura ("PAGTO.BOLETO",
  * "Pagamento efetuado|CARTOES...", "Pagamento de fatura"...). Detected by a
- * generic payment keyword + the amount matching one of the user's faturas.
- * Without the amount check, any boleto/PIX payment would be wrongly excluded.
+ * generic payment keyword + the amount matching ONE of the user's faturas
+ * whose due date is within 15 days of the payment. The due-date window
+ * prevents an unrelated PIX/boleto with the same amount as some fatura from
+ * being wrongly excluded, and a unique amount match prevents one payment from
+ * being attributed to the wrong fatura when several faturas share a value.
+ * Without a local Bill row (card not connected), nothing matches — the
+ * payment is imported normally instead of disappearing from the ledger.
  */
 async function isCreditCardBillPaymentByAmount(
   tx: PluggyTransaction,
-  bills: Array<{ amount: number }>,
+  bills: Array<{ amount: number; dueDate: Date }>,
   opts: { allowCredit?: boolean } = {}
 ): Promise<boolean> {
   // On bank accounts a fatura payment is a DEBIT (money out). On the credit
@@ -193,8 +198,14 @@ async function isCreditCardBillPaymentByAmount(
   }
   if (!isCreditCardBillPayment(tx.description)) return false;
   const amount = Math.abs(tx.amount);
-  // Matches a fatura value within R$ 0,01 (payment = fatura exact value).
-  return bills.some((b) => Math.abs(b.amount - amount) < 0.01);
+  const paymentDate = new Date(tx.date);
+  // Matches a fatura value within R$ 0,01 (payment = fatura exact value) and
+  // paid near its due date (boleto/fatura payments settle around the due day).
+  const candidates = bills.filter((b) => Math.abs(b.amount - amount) < 0.01);
+  if (candidates.length !== 1) return false;
+  const dueDiffDays =
+    Math.abs(candidates[0].dueDate.getTime() - paymentDate.getTime()) / 86400000;
+  return dueDiffDays <= 15;
 }
 
 /**
@@ -306,6 +317,25 @@ export async function syncItem(itemId: string, userId: string): Promise<SyncResu
       .map((a) => bankNameFromAccountName(a.name || ""))
       .find((n) => !!n) || null;
 
+  // 2.1 Bill pre-pass: upsert ALL credit-card faturas BEFORE processing any
+  // account. Bank-account payment matching (isCreditCardBillPaymentByAmount)
+  // reads the user's local bills — if a BANK account is processed first and
+  // the card bills don't exist yet, a real fatura payment would be imported
+  // and double-counted until a later sync removes it.
+  for (const account of accounts) {
+    if (!isCreditCardAccount(account)) continue;
+    try {
+      const bills = await client.listBills(account.id);
+      for (const bill of bills) {
+        await upsertBill(bill, account, userId, result);
+      }
+    } catch (err) {
+      result.errors.push(
+        `Fatura pré-pass conta ${account.id}: ${(err as Error).message}`
+      );
+    }
+  }
+
   for (const account of accounts) {
     try {
       // Owner of this account (from Open Finance holder name) — links the
@@ -325,8 +355,12 @@ export async function syncItem(itemId: string, userId: string): Promise<SyncResu
   await prisma.bankConnection.update({
     where: { id: connection.id },
     data: {
-      status: pluggyItem.status,
-      errorMessage: null,
+      // Partial failures must not mark the connection as fully healthy:
+      // keep the error detail visible in the UI until a clean sync.
+      status:
+        result.errors.length > 0 ? "PARTIAL_SUCCESS" : pluggyItem.status,
+      errorMessage:
+        result.errors.length > 0 ? result.errors.join("; ") : null,
       lastSyncAt: new Date(),
       connectorName: pluggyItem.connector?.name || connection.connectorName,
     },
@@ -353,7 +387,7 @@ async function syncBankAccount(
   // (PAGTO.BOLETO com valor igual ao da fatura) e não duplicar o gasto.
   const userBills = await prisma.bill.findMany({
     where: { userId, source: "PLUGGY" },
-    select: { amount: true },
+    select: { amount: true, dueDate: true },
   });
 
   for (const tx of transactions) {
@@ -448,18 +482,18 @@ async function syncCreditCard(
   ownerPerson?: "HUSBAND" | "WIFE" | null
 ): Promise<void> {
   // --- Faturas (bills) ---
-  const bills = await client.listBills(account.id);
-  for (const bill of bills) {
-    await upsertBill(bill, account, userId, result);
-  }
+  // Upserted by the bill pre-pass in syncItem() so bank-account payment
+  // matching always sees them. Nothing to do here.
 
   // --- Transactions (purchases) ---
   const transactions = await client.listTransactions(account.id);
   let paymentMethod = normalizePaymentMethod(account, connectorName);
   // Card account name is generic ("platinum", "gold") — use the item's bank
   // (from its checking account) so the payment method reads "NUBANK".
+  // Normalize spaces the same way normalizePaymentMethod does, so aliases
+  // like "BANCO DO BRASIL" don't create a second payment method.
   if (paymentMethod === "CARTAO" && itemBankName) {
-    paymentMethod = itemBankName;
+    paymentMethod = itemBankName.replace(/\s+/g, "_");
   }
 
   // Faturas do usuário — pagamento da fatura via boleto aparece TAMBÉM na
@@ -467,7 +501,7 @@ async function syncCreditCard(
   // fatura). Ignorar para não duplicar o gasto (fatura já conta 1x).
   const userBills = await prisma.bill.findMany({
     where: { userId, source: "PLUGGY" },
-    select: { id: true, externalId: true, amount: true },
+    select: { id: true, externalId: true, amount: true, dueDate: true },
   });
   // Pluggy transaction meta.billId is the PLUGGY bill id; the local Bill row
   // has its own uuid with externalId = pluggy id. Map one to the other so
@@ -482,18 +516,20 @@ async function syncCreditCard(
     // duplicates once POSTED); only the invoice-balance marker is skipped.
     if (isInvoiceBalanceMarker(tx)) continue;
 
-    // Bill payment rows on the credit card account (PAGTO.BOLETO with the
-    // fatura value) — the fatura already counts the expense once. Rows
-    // imported before this filter existed are deleted (legacy cleanup).
-    // On the card account the payment arrives as CREDIT (card credited when
-    // the fatura is paid), hence allowCredit.
-    if (await isCreditCardBillPaymentByAmount(tx, userBills, { allowCredit: true })) {
-      const legacy = await prisma.transaction.findUnique({
-        where: { userId_externalId: { userId, externalId: tx.id } },
-      });
-      if (legacy) {
-        await prisma.transaction.delete({ where: { id: legacy.id } });
-        console.log(`[pluggy-sync] removido pagamento de fatura legado: ${tx.description} (${tx.id})`);
+    // CREDIT rows on the card account are bill payments (skipped below when
+    // they match a known fatura) or REFUNDS/estornos. Refunds must NOT be
+    // stored as positive expenses (they would inflate the card total), so
+    // unmatched CREDIT rows are skipped — the fatura's own total already
+    // nets refunds.
+    if (tx.type === "CREDIT") {
+      if (await isCreditCardBillPaymentByAmount(tx, userBills, { allowCredit: true })) {
+        const legacy = await prisma.transaction.findUnique({
+          where: { userId_externalId: { userId, externalId: tx.id } },
+        });
+        if (legacy) {
+          await prisma.transaction.delete({ where: { id: legacy.id } });
+          console.log(`[pluggy-sync] removido pagamento de fatura legado: ${tx.description} (${tx.id})`);
+        }
       }
       continue;
     }
@@ -505,8 +541,20 @@ async function syncCreditCard(
     const meta = tx.creditCardMetadata || {};
     const totalInstallments = meta.totalInstallments || 1;
     const currentInstallment = meta.installmentNumber || 1;
-    // App convention: amount = TOTAL purchase value; monthly parcel = amount/total
-    const amount = Math.abs(meta.totalAmount ?? tx.amount);
+    // App convention: amount = parcela do mês (o que é cobrado na fatura do
+    // mês); totalAmount = valor TOTAL da compra (soma das parcelas). Pluggy
+    // manda tx.amount = parcela e creditCardMetadata.totalAmount = total
+    // (opcional). Quando totalAmount não vem, o total é reconstruído como
+    // parcela × nº de parcelas — nunca armazenamos o total no lugar da
+    // parcela, senão o total do cartão no dashboard seria N× maior.
+    const amount = Math.abs(tx.amount);
+    const totalAmount =
+      meta.totalAmount != null
+        ? Math.abs(meta.totalAmount)
+        : totalInstallments > 1
+          ? amount * totalInstallments
+          : null;
+
     const categoryName = getOrCreateCategoryName(tx.category, tx.description);
     const categoryId = categoryName
       ? await findOrCreateCategory(categoryName, userId)
@@ -514,6 +562,7 @@ async function syncCreditCard(
 
     const data = {
       amount,
+      totalAmount,
       type: "EXPENSE" as const,
       description: tx.description,
       date: new Date(tx.date),
@@ -540,6 +589,7 @@ async function syncCreditCard(
       // (person is sync-driven too: the account owner decides husband/wife).
       const changed =
         existing.amount !== data.amount ||
+        existing.totalAmount !== data.totalAmount ||
         existing.description !== data.description ||
         existing.date.getTime() !== data.date.getTime() ||
         existing.billId !== data.billId ||
@@ -552,6 +602,7 @@ async function syncCreditCard(
           where: { id: existing.id },
           data: {
             amount: data.amount,
+            totalAmount: data.totalAmount,
             description: data.description,
             date: data.date,
             billId: data.billId,

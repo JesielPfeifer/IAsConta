@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import crypto from "crypto";
 import { PrismaClient } from "@prisma/client";
 import { authMiddleware } from "../middleware/auth.js";
 import {
@@ -256,6 +257,41 @@ router.post("/items/:itemId/sync", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
     const itemId = req.params.itemId as string;
+
+    // Server-side persistence for the Connect Widget flow: the widget returns
+    // an itemId that may not have a bankConnection row yet (no local create
+    // happens before onSuccess). Persist it here so sync works and the
+    // connection is listed in the UI. Repeated calls are idempotent.
+    let conn = await prisma.bankConnection.findFirst({
+      where: { itemId, userId: user.id },
+    });
+    if (!conn) {
+      const creds = await credsForUser(user.id);
+      if (!creds) {
+        res.status(400).json({ error: "Pluggy não configurado para este usuário" });
+        return;
+      }
+      let item;
+      try {
+        item = await createPluggyClient(creds).getItem(itemId);
+      } catch (err) {
+        res.status(404).json({
+          error: `Item não encontrado na Pluggy: ${err instanceof PluggyError ? err.message : "erro desconhecido"}`,
+        });
+        return;
+      }
+      conn = await prisma.bankConnection.create({
+        data: {
+          bankName: item.connector?.name || "Conexão Pluggy",
+          itemId,
+          connectorId: item.connector?.id ?? null,
+          connectorName: item.connector?.name || null,
+          status: item.status,
+          userId: user.id,
+        },
+      });
+    }
+
     const result = await syncItem(itemId, user.id);
     res.json(result);
   } catch (err) {
@@ -340,6 +376,29 @@ router.delete("/items/:itemId", async (req: Request, res: Response) => {
       return;
     }
 
+    // Resolve the account IDs from LOCAL data (persisted by sync) BEFORE
+    // touching Pluggy: listing accounts of an already-deleted remote item
+    // fails, and the cleanup below would then match nothing, orphaning the
+    // imported transactions/bills (and re-importing them double-counts).
+    const [txAccounts, billAccounts] = await Promise.all([
+      prisma.transaction.findMany({
+        where: { userId: user.id, pluggyAccountId: { not: null } },
+        select: { pluggyAccountId: true },
+        distinct: ["pluggyAccountId"],
+      }),
+      prisma.bill.findMany({
+        where: { userId: user.id, pluggyAccountId: { not: null } },
+        select: { pluggyAccountId: true },
+        distinct: ["pluggyAccountId"],
+      }),
+    ]);
+    const accountIds = [
+      ...new Set([
+        ...txAccounts.map((a) => a.pluggyAccountId as string),
+        ...billAccounts.map((b) => b.pluggyAccountId as string),
+      ]),
+    ];
+
     const creds = await credsForUser(user.id);
     if (creds) {
       const client = createPluggyClient(creds);
@@ -352,7 +411,6 @@ router.delete("/items/:itemId", async (req: Request, res: Response) => {
     }
 
     // Remove imported data (transactions + faturas from this item's accounts)
-    const accountIds = await getAccountIdsForConnection(itemId, user.id);
     await prisma.$transaction([
       prisma.transaction.deleteMany({
         where: { userId: user.id, pluggyAccountId: { in: accountIds } },
@@ -405,31 +463,22 @@ router.post("/webhooks/register", async (req: Request, res: Response) => {
   }
 });
 
-async function getAccountIdsForConnection(itemId: string, userId: string): Promise<string[]> {
-  const conn = await prisma.bankConnection.findFirst({ where: { itemId, userId } });
-  if (!conn) return [];
-  const creds = await credsForUser(userId);
-  if (!creds) return [];
-  const client = createPluggyClient(creds);
-  try {
-    const accounts = await client.listAccounts(itemId);
-    return accounts.map((a) => a.id);
-  } catch {
-    return [];
-  }
-}
-
 // ---------------------------------------------------------------
 // Webhook (public, validated via header X-Webhook-Secret)
 // ---------------------------------------------------------------
 router.post("/webhook", async (req: Request, res: Response) => {
   const expected = process.env.WEBHOOK_SECRET;
-  if (expected) {
-    const received = (req.headers["x-webhook-secret"] as string) || "";
-    if (received !== expected) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
+  // Fail fast when the secret is not configured: skipping the check would
+  // accept unauthenticated webhook requests and let anyone trigger syncs.
+  if (!expected) {
+    console.error("[pluggy-webhook] FATAL: WEBHOOK_SECRET not configured");
+    res.status(500).json({ error: "Server misconfiguration" });
+    return;
+  }
+  const received = (req.headers["x-webhook-secret"] as string) || "";
+  if (!timingSafeEqualStr(received, expected)) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
   }
 
   const body = (req.body || {}) as Record<string, unknown>;
@@ -444,5 +493,13 @@ router.post("/webhook", async (req: Request, res: Response) => {
     res.sendStatus(200); // always ack to avoid Pluggy retry storms
   }
 });
+
+/** Constant-time string comparison (no length short-circuit). */
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
 
 export default router;

@@ -94,7 +94,7 @@ services:
             LOG_LEVEL: ERROR,WARN,INFO
             LOG_BAILEYS: error
             WA_BUSINESS_TOKEN_WEBHOOK: secret_api_key
-            WEBHOOK_GLOBAL_ENABLED: "false"
+            WEBHOOK_GLOBAL_ENABLED: "true"
             WEBHOOK_GLOBAL_URL: http://api:3001/webhook/evolution
             WEBHOOK_GLOBAL_EVENTS: "MESSAGES_UPSERT"
             WEBHOOK_GLOBAL_HEADERS: '{"x-webhook-secret":"${WEBHOOK_SECRET}"}'
