@@ -145,7 +145,7 @@ export default function PluggySettingsCard() {
         });
       }
 
-      const handler = new PluggyConnect({
+      const handler = new (window as any).PluggyConnect({
         connectToken: accessToken,
         onSuccess: async ({ itemId }: { itemId: string }) => {
           setSyncMessage('Conta conectada! Sincronizando dados...');
