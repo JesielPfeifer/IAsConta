@@ -309,6 +309,10 @@ router.get("/financial-health", async (req: Request, res: Response) => {
   try {
     const user = await getBotUser();
     const { start, end } = getCurrentMonthRange();
+    // Parcelas "atuais": a de cada compra com data até o FIM do mês corrente.
+    // Parcelas futuras (datas em meses seguintes) existem no banco mas NÃO
+    // são a parcela atual — usar a mais avançada com data <= endOfMonth.
+    const endOfMonth = new Date(end);
 
     const [fixedIncomes, faturas, installments, cardMonthTx] = await Promise.all([
       prisma.fixedIncome.findMany({
@@ -330,6 +334,9 @@ router.get("/financial-health", async (req: Request, res: Response) => {
           userId: user.id,
           source: "PLUGGY",
           totalInstallments: { gt: 1 },
+          // Only parcels whose date is within the current month or earlier —
+          // future parcels (next months) are not the "current" one.
+          date: { lt: endOfMonth },
         },
         select: {
           description: true,
@@ -357,12 +364,13 @@ router.get("/financial-health", async (req: Request, res: Response) => {
       }),
     ]);
 
-    // Keep only open installments (current < total)
-    const open = installments.filter((tx) => tx.currentInstallment < tx.totalInstallments);
-
-    // Group installments by purchase (installmentGroupId)
-    const groups = new Map<string, (typeof open)[number][]>();
-    for (const tx of open) {
+    // Group ALL installments by purchase — the group is "open" only when its
+    // HIGHEST installment (MAX currentInstallment) is still below the total.
+    // Filtering by individual rows (current < total) is wrong: a purchase
+    // whose last parcel was already charged (e.g. SHOPEE 2/2 on 14/08) would
+    // still show the 1/2 row as "open".
+    const groups = new Map<string, (typeof installments)[number][]>();
+    for (const tx of installments) {
       const key = tx.installmentGroupId || `${tx.description}|${tx.paymentMethod}`;
       const g = groups.get(key);
       if (g) g.push(tx);
@@ -371,7 +379,7 @@ router.get("/financial-health", async (req: Request, res: Response) => {
 
     const openPurchases = Array.from(groups.values())
       .map((txs) => {
-        // Latest installment row of the purchase
+        // Latest installment row of the purchase (highest currentInstallment)
         const latest = txs.reduce((a, b) =>
           b.currentInstallment > a.currentInstallment ? b : a
         );
@@ -387,6 +395,8 @@ router.get("/financial-health", async (req: Request, res: Response) => {
           remainingTotal: latest.amount * remaining,
         };
       })
+      // Open = highest parcel charged is still below the total
+      .filter((p) => p.remaining > 0)
       .sort((a, b) => a.remaining - b.remaining);
 
     // Installments finishing soon: 1-2 parcels left AND the purchase is well

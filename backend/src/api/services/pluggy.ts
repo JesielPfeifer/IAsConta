@@ -392,11 +392,26 @@ export interface PluggyBill {
 // ---------------------------------------------------------------
 // Pure helpers (no credentials needed)
 // ---------------------------------------------------------------
-/** Deterministic group id for installments of the same purchase (Pluggy has no group id). */
-export function installmentGroupKey(tx: PluggyTransaction): string {
+/**
+ * Deterministic group id for installments of the same purchase (Pluggy has no
+ * group id). The description carries the parcel marker ("X/Y" suffix) which
+ * differs per installment — strip it so all parcels of the same purchase map
+ * to the same group. The account id and the ROUNDED parcel amount are part of
+ * the key so two DIFFERENT purchases from the same store (e.g. two CAMPO BOM
+ * orders in 10x) stay in separate groups, while cents-level differences
+ * between parcels of the same purchase (fees) still group together.
+ */
+export function installmentGroupKey(
+  tx: PluggyTransaction,
+  accountId?: string | null
+): string {
   const meta = tx.creditCardMetadata || {};
   const total = meta.totalInstallments || 1;
-  const base = `${tx.description}|${Math.abs(meta.totalAmount ?? tx.amount)}|${total}`;
+  const cleanDescription = (tx.description || "")
+    .replace(/\s*\d{1,3}\s*\/\s*\d{1,3}\s*$/i, "")
+    .trim();
+  const roundedAmount = Math.round(Math.abs(meta.totalAmount ?? tx.amount));
+  const base = `${cleanDescription}|${total}|${roundedAmount}|${accountId || ""}`;
   return `pluggy-${crypto.createHash("md5").update(base).digest("hex").slice(0, 16)}`;
 }
 

@@ -529,7 +529,7 @@ async function syncCreditCard(
       totalInstallments,
       currentInstallment,
       installmentGroupId:
-        totalInstallments > 1 ? installmentGroupKey(tx) : null,
+        totalInstallments > 1 ? installmentGroupKey(tx, account.id) : null,
       categoryId,
       externalId: tx.id,
       userId,
@@ -544,6 +544,7 @@ async function syncCreditCard(
         existing.date.getTime() !== data.date.getTime() ||
         existing.billId !== data.billId ||
         existing.person !== data.person ||
+        existing.installmentGroupId !== data.installmentGroupId ||
         existing.currentInstallment !== data.currentInstallment ||
         existing.totalInstallments !== data.totalInstallments;
       if (changed) {
