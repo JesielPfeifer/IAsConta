@@ -60,14 +60,23 @@ function formatConfirmation(parsed: ParsedTransaction): string {
   msg += `\n━━━━━━━━━━━━━━\n`;
   msg += `🤔 *Perguntas rápidas:*\n`;
   msg += `• É uma *conta fixa*? Responda _sim_ ou _nao_\n`;
-  
+
   // Only ask about installments if not already detected
   if (!parsed.installments || parsed.installments.total <= 1) {
-    msg += `• Foi *parcelado*? Responda _sim_ ou _nao_`;
+    msg += `• Foi *parcelado*? Responda _sim_ ou _nao_\n`;
   } else {
-    msg += `• Parcelado em *${parsed.installments.total}x* detectado! ✓`;
+    msg += `• Parcelado em *${parsed.installments.total}x* detectado! ✓\n`;
   }
-  
+
+  // How to answer (clears up the follow-up flow)
+  msg += `\n💡 *Como responder:*\n`;
+  msg += `• Uma por vez: _sim_ ou _nao_\n`;
+  msg += `• As duas juntas: _sim e sim_ ou _sim, nao_\n`;
+  if (!parsed.installments || parsed.installments.total <= 1) {
+    msg += `• Se foi parcelado, mande só o número de vezes: _3_, _6_, _10_...\n`;
+  }
+  msg += `• Para cancelar: envie _nao_ nas duas`;
+
   return msg;
 }
 

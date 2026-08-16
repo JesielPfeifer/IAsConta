@@ -7,22 +7,31 @@ export interface CommandResult {
   message: string;
 }
 
-const COMMANDS_HELP = `📋 *Comandos disponiveis:*
-• saldo — Resumo financeiro do mes
-• gastos [categoria] — Gastos por categoria  
-• contas a vencer — Proximas contas
-• saude — Saude financeira do casal (sobra, parcelas acabando)
-• onde economizar — Dicas de economia
-• mes que mais gastei — Pior mes do ano
-• investimentos — Resumo investimentos
-• meta [nome] — Progresso de meta
-• ajuda — Esta lista`;
+const COMMANDS_HELP = `📋 *O que eu posso fazer:*\n
+📊 *Consultar* — _saldo_, _gastos_, _contas a vencer_, _saude_
+💡 *Dicas* — _onde economizar_, _mes que mais gastei_
+📈 *Investimentos* — _investimentos_
+🎯 *Metas* — _meta_ (ou _meta casa_)
+✍️ *Registrar* — envie o gasto direto, ex: \"gastei 40 no crepe\" ou \"recebi 3000\"
+❓ *Ajuda* — _ajuda_ para ver esta lista`;
 
 export async function handleFinancialCommand(
   text: string,
   userId?: string,
 ): Promise<CommandResult> {
   const lower = text.toLowerCase().trim();
+
+  // --- SAUDACAO ---
+  if (/^(oi+|ola|olá|bom dia|boa tarde|boa noite|e ai|e aí|opa|hello|hi|hey|oie|oiie|tudo bem|tudo bom)[!?.\s]*$/i.test(lower) ||
+      /^(bom dia|boa tarde|boa noite|ola|olá|oi|opa|hey)\b.*\b(bot|contas|tudo bem|tudo bom)/i.test(lower)) {
+    const greetings = ['Oi!', 'Olá!', 'Opa!', 'E aí!', 'Oi oi!'];
+    const greeting = greetings[Math.floor(Math.random() * greetings.length)];
+    return {
+      handled: true,
+      message: `${greeting} 😊 Sou o assistente financeiro do casal!\n\n${COMMANDS_HELP}`,
+    };
+  }
+
   const prisma = new PrismaClient();
 
   // --- SALDO / RESUMO ---
