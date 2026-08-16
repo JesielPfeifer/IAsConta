@@ -130,34 +130,42 @@ function normalizePaymentMethod(account: PluggyAccount, connectorName?: string |
   return "CARTAO";
 }
 
-/** True when a bank-account transaction is a credit card bill payment (fatura). */
+/** True when a bank-account transaction looks like a payment (boleto, PIX,
+ * transfer, invoice settlement...). Generic — the amount check against the
+ * user's faturas happens separately, so no bank/name is hardcoded. */
 function isCreditCardBillPayment(description: string): boolean {
   const d = description
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
-  return /(fatura|invoice).*(cartao|card|credito|visa|master|elo)/.test(d) ||
-    /(cartao|card).*(fatura|invoice)/.test(d) ||
-    /pagamento\s+(de\s+)?fatura/.test(d) ||
-    // Boleto/fatura payment markers: PAGTO.BOLETO, PGTO.BOLETO, PAG BOLETO,
-    // PAGAMENTO DE BOLETO... (amount check against faturas happens separately)
-    (d.includes("boleto") && /\b(pag|pgto|pagto|pagamento)\b/.test(d)) ||
-    (d.includes("fatura") && /\b(pag|pgto|pagto|pagamento)\b/.test(d));
+  return (
+    /\b(pag|pgto|pagto|pagamento|pix|transfer|boleto|fatura|invoice)\b/.test(d) ||
+    /(fatura|invoice).*(cartao|card|credito|visa|master|elo)/.test(d) ||
+    /(cartao|card).*(fatura|invoice)/.test(d)
+  );
 }
 
 /**
- * Bank-account transaction that pays a credit card fatura via boleto
- * ("PAGTO.BOLETO", "PAGAMENTO DE BOLETO"...). Detected by description + the
- * amount matching one of the user's credit card bills (faturas). Without the
- * amount check, any boleto payment would be wrongly excluded.
+ * Bank-account transaction that pays a credit card fatura ("PAGTO.BOLETO",
+ * "Pagamento efetuado|CARTOES...", "Pagamento de fatura"...). Detected by a
+ * generic payment keyword + the amount matching one of the user's faturas.
+ * Without the amount check, any boleto/PIX payment would be wrongly excluded.
  */
 async function isCreditCardBillPaymentByAmount(
   tx: PluggyTransaction,
-  bills: Array<{ amount: number }>
+  bills: Array<{ amount: number }>,
+  opts: { allowCredit?: boolean } = {}
 ): Promise<boolean> {
+  // On bank accounts a fatura payment is a DEBIT (money out). On the credit
+  // card account the same payment arrives as CREDIT (the card is credited
+  // when the fatura is paid) — allowCredit covers that case. An INCOME row
+  // on a bank account ("PIX RECEBIDO") is never a bill payment.
+  if (tx.type !== "DEBIT" && !(opts.allowCredit && tx.type === "CREDIT")) {
+    return false;
+  }
   if (!isCreditCardBillPayment(tx.description)) return false;
   const amount = Math.abs(tx.amount);
-  // Matches a fatura value within R$ 0,01 (boleto = fatura exact value).
+  // Matches a fatura value within R$ 0,01 (payment = fatura exact value).
   return bills.some((b) => Math.abs(b.amount - amount) < 0.01);
 }
 
@@ -318,8 +326,16 @@ async function syncBankAccount(
 
     // Skip credit card bill payments: the fatura is already represented as a
     // Bill row (source PLUGGY) and counts the expense once. Importing the
-    // payment here too would double-count it.
+    // payment here too would double-count it. Legacy rows imported before
+    // this filter existed are deleted.
     if (await isCreditCardBillPaymentByAmount(tx, userBills)) {
+      const legacy = await prisma.transaction.findUnique({
+        where: { userId_externalId: { userId, externalId: tx.id } },
+      });
+      if (legacy) {
+        await prisma.transaction.delete({ where: { id: legacy.id } });
+        console.log(`[pluggy-sync] removido pagamento de fatura legado: ${tx.description} (${tx.id})`);
+      }
       continue;
     }
 
@@ -400,8 +416,15 @@ async function syncCreditCard(
   // fatura). Ignorar para não duplicar o gasto (fatura já conta 1x).
   const userBills = await prisma.bill.findMany({
     where: { userId, source: "PLUGGY" },
-    select: { amount: true },
+    select: { id: true, externalId: true, amount: true },
   });
+  // Pluggy transaction meta.billId is the PLUGGY bill id; the local Bill row
+  // has its own uuid with externalId = pluggy id. Map one to the other so
+  // transactions are actually linked to the local fatura (prevents the
+  // fatura + its purchases from double-counting in summaries).
+  const billByExternalId = new Map(
+    userBills.filter((b) => b.externalId).map((b) => [b.externalId as string, b.id])
+  );
 
   for (const tx of transactions) {
     // PENDING purchases are imported too (dedupe by externalId prevents
@@ -409,8 +432,20 @@ async function syncCreditCard(
     if (isInvoiceBalanceMarker(tx)) continue;
 
     // Bill payment rows on the credit card account (PAGTO.BOLETO with the
-    // fatura value) — the fatura already counts the expense once.
-    if (await isCreditCardBillPaymentByAmount(tx, userBills)) continue;
+    // fatura value) — the fatura already counts the expense once. Rows
+    // imported before this filter existed are deleted (legacy cleanup).
+    // On the card account the payment arrives as CREDIT (card credited when
+    // the fatura is paid), hence allowCredit.
+    if (await isCreditCardBillPaymentByAmount(tx, userBills, { allowCredit: true })) {
+      const legacy = await prisma.transaction.findUnique({
+        where: { userId_externalId: { userId, externalId: tx.id } },
+      });
+      if (legacy) {
+        await prisma.transaction.delete({ where: { id: legacy.id } });
+        console.log(`[pluggy-sync] removido pagamento de fatura legado: ${tx.description} (${tx.id})`);
+      }
+      continue;
+    }
 
     const existing = await prisma.transaction.findUnique({
       where: { userId_externalId: { userId, externalId: tx.id } },
@@ -435,7 +470,7 @@ async function syncCreditCard(
       paymentMethod,
       isFixed: false,
       isCreditCard: true,
-      billId: meta.billId || null,
+      billId: meta.billId ? (billByExternalId.get(meta.billId) ?? null) : null,
       pluggyAccountId: account.id,
       totalInstallments,
       currentInstallment,

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { authMiddleware } from "../middleware/auth.js";
+import { filterInternalTransfers } from "./dashboard.js";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -25,8 +26,16 @@ router.get("/", async (req: Request, res: Response) => {
       where: {
         userId: user.id,
         date: { gte: start, lt: end },
+        // Transactions linked to a credit card fatura are excluded: the
+        // corresponding Bill row already counts that expense once (same rule
+        // as the monthly summary — otherwise purchases + fatura double-count).
+        billId: null,
       },
     });
+
+    // Internal transfers between the user's own accounts are not income nor
+    // expense (same rule as the monthly summary).
+    const visibleTransactions = filterInternalTransfers(transactions);
 
     const bills = await prisma.bill.findMany({
       where: {
@@ -42,7 +51,7 @@ router.get("/", async (req: Request, res: Response) => {
       monthsData[key] = { income: 0, expense: 0 };
     }
 
-    for (const tx of transactions) {
+    for (const tx of visibleTransactions) {
       const m = `${tx.date.getFullYear()}-${String(tx.date.getMonth() + 1).padStart(2, "0")}`;
       if (!monthsData[m]) continue;
       if (tx.type === "INCOME") {

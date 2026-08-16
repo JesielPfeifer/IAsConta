@@ -7,6 +7,38 @@ const prisma = new PrismaClient();
 
 router.use(authMiddleware);
 
+/**
+ * Internal transfers between the user's own accounts (e.g. Caixa ↔ Nubank)
+ * are NOT income nor expense — they just move money between the couple's own
+ * accounts. No bank/name is hardcoded: a transfer pair is detected purely
+ * from Open Finance data — one leg out (EXPENSE) and one leg in (INCOME) on
+ * DIFFERENT accounts of the same user, same amount, dates within 3 days,
+ * both descriptions indicating a transfer (PIX/transfer).
+ */
+const TRANSFER_RE = /(?:pix|transfer|ted|doc|envio|recebimento)/i;
+
+export function filterInternalTransfers<T extends { id: string; type: string; amount: number; date: Date; description: string; pluggyAccountId?: string | null }>(
+  transactions: T[]
+): T[] {
+  const transferCandidates = transactions.filter(
+    (tx) => TRANSFER_RE.test(tx.description) && tx.pluggyAccountId
+  );
+  const isInternalTransfer = (tx: T): boolean => {
+    if (!TRANSFER_RE.test(tx.description) || !tx.pluggyAccountId) return false;
+    const wantedType = tx.type === "EXPENSE" ? "INCOME" : "EXPENSE";
+    return transferCandidates.some((other) => {
+      if (other.id === tx.id) return false;
+      if (other.type !== wantedType) return false;
+      if (other.pluggyAccountId === tx.pluggyAccountId) return false; // same account
+      if (Math.abs(Math.abs(other.amount) - Math.abs(tx.amount)) >= 0.01) return false;
+      const days = Math.abs(other.date.getTime() - tx.date.getTime()) / 86400000;
+      if (days > 3) return false;
+      return true;
+    });
+  };
+  return transactions.filter((tx) => !isInternalTransfer(tx));
+}
+
 function getMonthRange(month?: string): { start: Date; end: Date } {
   if (month && /^\d{4}-\d{2}$/.test(month)) {
     const [y, m] = month.split("-").map(Number);
@@ -25,7 +57,7 @@ router.get("/summary", async (req: Request, res: Response) => {
     const user = req.user!;
     const { start, end } = getMonthRange(req.query.month as string);
 
-    const [transactions, bills] = await Promise.all([
+    const [rawTransactions, bills] = await Promise.all([
       prisma.transaction.findMany({
         where: {
           userId: user.id,
@@ -43,6 +75,10 @@ router.get("/summary", async (req: Request, res: Response) => {
         },
       }),
     ]);
+
+    // Internal transfers between the user's own accounts are not income nor
+    // expense (same rule as the annual panorama).
+    const transactions = filterInternalTransfers(rawTransactions);
 
     let totalIncome = 0;
     let totalExpense = 0;
