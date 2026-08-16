@@ -12,7 +12,6 @@ const SETTINGS_KEYS = [
   "wifeName",
   "husbandName",
   "whatsappGroupId",
-  "botApiKey",
   "evolutionApiKey",
   "evolutionApiUrl",
   "discordToken",

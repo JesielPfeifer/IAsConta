@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { Loader2, Smartphone, Save, Users, Bot, MessageCircle, Search } from 'lucide-react';
 import { api } from '../api/client';
 import WhatsAppInstanceCard from '../components/WhatsAppInstanceCard';
@@ -10,7 +10,6 @@ interface UserSettings {
   husbandName: string;
   whatsappGroupId: string;
   whatsappGroupName: string;
-  botApiKey: string;
   evolutionApiKey: string;
   evolutionApiUrl: string;
   discordToken: string;
@@ -20,7 +19,7 @@ interface UserSettings {
 
 const EMPTY: UserSettings = {
   groqApiKey: '', wifeName: '', husbandName: '', whatsappGroupId: '', whatsappGroupName: '',
-  botApiKey: '', evolutionApiKey: '', evolutionApiUrl: '',
+  evolutionApiKey: '', evolutionApiUrl: '',
   discordToken: '', telegramToken: '', geminiApiKey: '',
 };
 
@@ -83,15 +82,6 @@ export default function Setup() {
     }
   }
 
-
-
-
-
-
-
-
-
-
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-8">
       <div className="flex items-center gap-3 mb-6">
@@ -99,9 +89,9 @@ export default function Setup() {
         <h1 className="text-2xl font-bold text-white">Configuracao</h1>
       </div>
 
-            <WhatsAppInstanceCard />
+      <WhatsAppInstanceCard />
 
-            <PluggySettingsCard />
+      <PluggySettingsCard />
 
       {/* WhatsApp Group */}
       <section className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-4">
