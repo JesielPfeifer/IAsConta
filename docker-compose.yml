@@ -42,7 +42,10 @@ services:
             EVOLUTION_API_URL: http://evolution-api:8080
             JWT_SECRET: ${JWT_SECRET}
             BOT_API_KEY: ${BOT_API_KEY}
-            WEBHOOK_SECRET: ${WEBHOOK_SECRET}
+            # Secrets de webhook DEDICADOS e OBRIGATÓRIOS (sem fallback): sem
+            # eles o servidor NÃO inicia (falha no startup, ver index.ts).
+            EVOLUTION_WEBHOOK_SECRET: ${EVOLUTION_WEBHOOK_SECRET}
+            PLUGGY_WEBHOOK_SECRET: ${PLUGGY_WEBHOOK_SECRET}
             CORS_ORIGINS: ${CORS_ORIGINS}
         ports:
             - "127.0.0.1:3001:3001"
@@ -94,10 +97,13 @@ services:
             LOG_LEVEL: ERROR,WARN,INFO
             LOG_BAILEYS: error
             WA_BUSINESS_TOKEN_WEBHOOK: secret_api_key
-            WEBHOOK_GLOBAL_ENABLED: "true"
+            # Global webhook DISABLED: Evolution v2.3.7 sends it WITHOUT custom
+            # headers → API rejeita (401) e gera ruído. Eventos devem vir sempre
+            # por webhook POR-INSTÂNCIA (configurado pelo app na criação).
+            WEBHOOK_GLOBAL_ENABLED: "false"
             WEBHOOK_GLOBAL_URL: http://api:3001/webhook/evolution
             WEBHOOK_GLOBAL_EVENTS: "MESSAGES_UPSERT"
-            WEBHOOK_GLOBAL_HEADERS: '{"x-webhook-secret":"${WEBHOOK_SECRET}"}'
+            WEBHOOK_GLOBAL_HEADERS: '{"x-webhook-secret":"${EVOLUTION_WEBHOOK_SECRET}"}'
         depends_on:
             postgres:
                 condition: service_healthy

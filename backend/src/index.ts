@@ -17,6 +17,9 @@ import userRoutes from "./api/routes/users.js";
 import chatRoutes from "./api/routes/chat.js";
 import whatsappRoutes from "./api/routes/whatsapp.js";
 import whatsappUserRoutes from "./api/routes/whatsapp-users.js";
+import paymentMethodRoutes from "./api/routes/payment-methods.js";
+import fixedIncomeRoutes from "./api/routes/fixed-incomes.js";
+import pluggyRoutes from "./api/routes/pluggy.js";
 import settingsRoutes from "./api/routes/settings.js";
 import annualRoutes from "./api/routes/annual.js";
 import { startWhatsApp, sendMessage } from "./bot/platforms/whatsapp.js";
@@ -31,6 +34,26 @@ const app = express();
 app.set("trust proxy", 1);
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+// ---------------------------------------------------------------------------
+// Webhook secrets são OBRIGATÓRIOS e NÃO têm fallback: se EVOLUTION_WEBHOOK_SECRET
+// ou PLUGGY_WEBHOOK_SECRET não estiverem definidos, o servidor NÃO sobe.
+// Um secret ausente significa webhook sem validação (requisições forjadas
+// aceitas) — melhor quebrar o startup do que aceitar isso silenciosamente.
+// ---------------------------------------------------------------------------
+function assertRequiredSecrets(): void {
+  const required: Array<[string, string | undefined]> = [
+    ["EVOLUTION_WEBHOOK_SECRET", process.env.EVOLUTION_WEBHOOK_SECRET],
+    ["PLUGGY_WEBHOOK_SECRET", process.env.PLUGGY_WEBHOOK_SECRET],
+  ];
+  for (const [name, value] of required) {
+    if (!value) {
+      console.error(`[config] FATAL: ${name} não configurado — defina no .env (sem fallback, o servidor não inicia).`);
+      process.exit(1);
+    }
+  }
+}
+assertRequiredSecrets();
 
 app.use(cors(corsOptions()));
 app.use(express.json({ limit: "1mb" }));
@@ -57,6 +80,9 @@ app.use("/api/users", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/whatsapp", whatsappRoutes);
 app.use("/api/whatsapp-users", whatsappUserRoutes);
+app.use("/api/payment-methods", paymentMethodRoutes);
+app.use("/api/fixed-incomes", fixedIncomeRoutes);
+app.use("/api/pluggy", pluggyRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/annual", annualRoutes);
 
@@ -88,16 +114,18 @@ app.post("/api/parse/caixa", upload.single("file"), async (req, res) => {
 
 app.post("/webhook/evolution", async (req, res) => {
   try {
-    // Validate webhook secret — fail if not configured
-    const webhookSecret = req.headers["x-webhook-secret"] as string;
-    const expectedSecret = process.env.WEBHOOK_SECRET;
+    // Validate webhook secret — fail if not configured. Dedicated secret,
+    // NO fallback: a leak in the Pluggy integration cannot forge Evolution
+    // webhooks, and a missing secret stops the server at startup.
+    const expectedSecret = process.env.EVOLUTION_WEBHOOK_SECRET;
     if (!expectedSecret) {
-      console.error("[webhook] FATAL: WEBHOOK_SECRET not configured");
+      console.error("[webhook] FATAL: EVOLUTION_WEBHOOK_SECRET not configured");
       res.status(500).json({ error: "Server misconfiguration" });
       return;
     }
+    const webhookSecret = req.headers["x-webhook-secret"] as string;
     if (webhookSecret !== expectedSecret) {
-      console.warn("[webhook] Invalid webhook secret, rejecting");
+      console.warn(`[webhook] Invalid webhook secret, rejecting. received=${JSON.stringify(webhookSecret)}`);
       res.status(401).json({ error: "Unauthorized" });
       return;
     }

@@ -28,6 +28,8 @@ model User {
   investments     Investment[]
   whatsappUsers   WhatsAppUser[]
   bankConnections BankConnection[]
+  paymentMethods  PaymentMethod[]
+  fixedIncomes    FixedIncome[]
 }
 
 model Transaction {
@@ -46,9 +48,17 @@ model Transaction {
   currentInstallment Int             @default(1)
   installmentGroupId String?
   isFixed            Boolean         @default(false)
+  // Pluggy integration
+  externalId         String?         // Pluggy transaction id (dedupe)
+  isCreditCard       Boolean         @default(false)
+  billId             String?         // Pluggy credit card bill id (fatura) this tx belongs to
+  pluggyAccountId    String?         // Pluggy account id that originated this tx
+  totalAmount        Float?          // Total purchase value when paid in installments (amount = monthly parcel)
   userId      String
   user        User            @relation(fields: [userId], references: [id])
   createdAt   DateTime        @default(now())
+
+  @@unique([userId, externalId])
 }
 
 model Category {
@@ -77,9 +87,15 @@ model Bill {
   category          Category? @relation(fields: [categoryId], references: [id])
   totalInstallments Int       @default(1)
   currentInstallment Int      @default(1)
+  // Pluggy integration (credit card faturas)
+  source            Source    @default(MANUAL)
+  externalId        String?   // Pluggy bill id (fatura) — dedupe
+  pluggyAccountId   String?   // Pluggy credit card account id
   userId            String
   user              User      @relation(fields: [userId], references: [id])
   createdAt         DateTime  @default(now())
+
+  @@unique([userId, externalId])
 }
 
 model Budget {
@@ -107,17 +123,29 @@ model UserSettings {
   discordToken String?
   telegramToken String?
   geminiApiKey String?
+  pluggyClientId String?
+  pluggyClientSecret String?
   failedLoginAttempts Int    @default(0)
   lockedUntil         DateTime?
   updatedAt  DateTime @updatedAt
 }
 
 model BankConnection {
-  id        String   @id @default(uuid())
-  bankName  String
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  createdAt DateTime @default(now())
+  id           String    @id @default(uuid())
+  bankName     String
+  // Pluggy integration
+  itemId       String?   @unique // Pluggy item id
+  connectorId  Int?
+  connectorName String?
+  status       String?          // Pluggy item status (LOGIN_OK, LOGIN_ERROR, ...)
+  lastSyncAt   DateTime?
+  errorMessage String?
+  // Pluggy account ids belonging to this item — persisted at sync time so the
+  // DELETE cleanup only removes THIS connection's imported data.
+  accountIds   String[]  @default([])
+  userId       String
+  user         User      @relation(fields: [userId], references: [id])
+  createdAt    DateTime  @default(now())
 }
 
 model WhatsAppUser {
@@ -179,4 +207,35 @@ enum Source {
   BOT
   NUBANK_CSV
   CAIXA_PDF
+  PLUGGY
+}
+
+enum PaymentMethodType {
+  CARD // cartão de crédito (Nubank, Caixa...)
+  ACCOUNT // valor em conta (débito, dinheiro, Pix)
+}
+
+model PaymentMethod {
+  id        String            @id @default(uuid())
+  name      String // display name, ex: "Caixa", "Nubank", "Dinheiro"
+  type      PaymentMethodType
+  active    Boolean           @default(true)
+  userId    String
+  user      User              @relation(fields: [userId], references: [id])
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@unique([userId, name])
+}
+
+model FixedIncome {
+  id        String   @id @default(uuid())
+  name      String // ex: "Salário Jesiel", "Aluguel recebido"
+  amount    Float
+  person    Person?  // dono da renda (HUSBAND/WIFE/COUPLE)
+  active    Boolean  @default(true)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

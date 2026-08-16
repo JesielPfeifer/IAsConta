@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import { QrCode, CheckCircle2, Loader2, RefreshCw, Power, Smartphone, Save, Users, Bot, MessageCircle, Search } from 'lucide-react';
 import { api } from '../api/client';
+import PluggySettingsCard from '../components/PluggySettingsCard';
+import PaymentMethodsCard from '../components/PaymentMethodsCard';
 
 interface UserSettings {
   groqApiKey: string;
@@ -306,6 +308,12 @@ export default function Setup() {
           </div>
         )}
       </section>
+
+      {/* Pluggy Open Finance */}
+      <PluggySettingsCard />
+
+      {/* Payment Methods */}
+      <PaymentMethodsCard />
 
       {/* WhatsApp Group */}
       <section className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-4">

@@ -31,6 +31,7 @@ interface CreditCardTx {
   paymentMethod: string;
   totalInstallments: number;
   currentInstallment: number;
+  installmentAmount?: number;
 }
 
 export default function Dashboard() {
@@ -75,12 +76,14 @@ export default function Dashboard() {
     return due.isAfter(monthStart.subtract(1, 'day')) && due.isBefore(monthEnd.add(1, 'day'));
   });
 
+  // Exclude bill-linked transactions: the summary counts the fatura (Bill)
+  // once, and showing the card purchases here too would double-display them.
   const variableExpenses = transactions.filter(
-    (t) => t.type === 'EXPENSE' && !t.isFixed
+    (t) => t.type === 'EXPENSE' && !t.isFixed && !t.billId
   );
   
   const fixedExpenses = transactions.filter(
-    (t) => t.type === 'EXPENSE' && t.isFixed
+    (t) => t.type === 'EXPENSE' && t.isFixed && !t.billId
   );
 
   if (loading) {
@@ -385,7 +388,7 @@ export default function Dashboard() {
       {creditCardTx.length > 0 && (
         <SectionCard
           title="Cartao de Credito"
-          subtitle={`Total: ${formatCurrency(creditCardTotal)} | ${creditCardTx.length} transacoes parceladas`}
+          subtitle={`Total: ${formatCurrency(creditCardTotal)} | ${creditCardTx.length} compras no cartao`}
           icon={<CreditCard className="h-5 w-5 text-amber-400" />}
           iconBg="bg-amber-500/10"
         >

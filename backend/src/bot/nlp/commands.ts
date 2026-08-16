@@ -7,21 +7,36 @@ export interface CommandResult {
   message: string;
 }
 
-const COMMANDS_HELP = `📋 *Comandos disponiveis:*
-• saldo — Resumo financeiro do mes
-• gastos [categoria] — Gastos por categoria  
-• contas a vencer — Proximas contas
-• onde economizar — Dicas de economia
-• mes que mais gastei — Pior mes do ano
-• investimentos — Resumo investimentos
-• meta [nome] — Progresso de meta
-• ajuda — Esta lista`;
+const COMMANDS_HELP = `📋 *O que eu posso fazer:*\n
+📊 *Consultar* — _saldo_, _gastos_, _contas a vencer_, _saude_
+💡 *Dicas* — _onde economizar_, _mes que mais gastei_
+📈 *Investimentos* — _investimentos_
+🎯 *Metas* — _meta_ (ou _meta casa_)
+✍️ *Registrar* — envie o gasto direto, ex: \"gastei 40 no crepe\" ou \"recebi 3000\"
+❓ *Ajuda* — _ajuda_ para ver esta lista`;
 
 export async function handleFinancialCommand(
   text: string,
   userId?: string,
 ): Promise<CommandResult> {
   const lower = text.toLowerCase().trim();
+
+  // Bot-authenticated GETs resolve the user from this identity (the API
+  // validates it against the active WhatsApp link) instead of falling back
+  // to a global "first active user" selection.
+  const userQS = userId ? `?userId=${encodeURIComponent(userId)}` : '';
+
+  // --- SAUDACAO ---
+  if (/^(oi+|ola|olá|bom dia|boa tarde|boa noite|e ai|e aí|opa|hello|hi|hey|oie|oiie|tudo bem|tudo bom)[!?.\s]*$/i.test(lower) ||
+      /^(bom dia|boa tarde|boa noite|ola|olá|oi|opa|hey)\b.*\b(bot|contas|tudo bem|tudo bom)/i.test(lower)) {
+    const greetings = ['Oi!', 'Olá!', 'Opa!', 'E aí!', 'Oi oi!'];
+    const greeting = greetings[Math.floor(Math.random() * greetings.length)];
+    return {
+      handled: true,
+      message: `${greeting} 😊 Sou o assistente financeiro do casal!\n\n${COMMANDS_HELP}`,
+    };
+  }
+
   const prisma = new PrismaClient();
 
   // --- SALDO / RESUMO ---
@@ -29,9 +44,9 @@ export async function handleFinancialCommand(
       /^(como está|como tá|como vai).*(financeiro|contas|gastos)/i.test(lower)) {
     try {
       const [summary, byCategory, percentage] = await Promise.all([
-        callApi<any>('/api/bot/dashboard/summary', {}, 'GET'),
-        callApi<any[]>('/api/bot/dashboard/by-category', {}, 'GET'),
-        callApi<any>('/api/bot/dashboard/percentage', {}, 'GET'),
+        callApi<any>(`/api/bot/dashboard/summary${userQS}`, {}, 'GET'),
+        callApi<any[]>(`/api/bot/dashboard/by-category${userQS}`, {}, 'GET'),
+        callApi<any>(`/api/bot/dashboard/percentage${userQS}`, {}, 'GET'),
       ]);
 
       const balance = summary?.balance ?? 0;
@@ -73,7 +88,7 @@ export async function handleFinancialCommand(
   // --- GASTOS POR CATEGORIA ---
   if (/^gastos?\s*(\w+)?$/i.test(lower) || /^(quanto|oq|o que)\s+gastei\s+(em|com|de)\s+(\w+)/i.test(lower)) {
     try {
-      const byCategory = await callApi<any[]>('/api/bot/dashboard/by-category', {}, 'GET').catch(() => []);
+      const byCategory = await callApi<any[]>(`/api/bot/dashboard/by-category${userQS}`, {}, 'GET').catch(() => []);
       
       // Extract category filter
       const catFilter = lower.replace(/^(gastos?|quanto|oq|o que)\s+(gastei\s+)?(em|com|de)?\s*/i, '').trim();
@@ -109,7 +124,7 @@ export async function handleFinancialCommand(
   // --- CONTAS A VENCER ---
   if (/^(contas?\s*(a\s*)?vencer|proximas?\s*contas?|faturas?|boletos?)$/i.test(lower)) {
     try {
-      const bills = await callApi<any[]>('/api/bot/dashboard/upcoming-bills', {}, 'GET').catch(() => []);
+      const bills = await callApi<any[]>(`/api/bot/dashboard/upcoming-bills${userQS}`, {}, 'GET').catch(() => []);
       
       if (bills.length > 0) {
         let msg = `📅 *Contas a Vencer*\n\n`;
@@ -133,9 +148,9 @@ export async function handleFinancialCommand(
       /^(me\s+ajuda|me\s+de\s+uma\s+dica|sugest[aã]o|conselho)/i.test(lower)) {
     try {
       const [summary, byCategory, yearAnalysis] = await Promise.all([
-        callApi<any>('/api/bot/dashboard/summary', {}, 'GET').catch(() => null),
-        callApi<any[]>('/api/bot/dashboard/by-category', {}, 'GET').catch(() => []),
-        callApi<any>('/api/bot/dashboard/year-analysis', {}, 'GET').catch(() => null),
+        callApi<any>(`/api/bot/dashboard/summary${userQS}`, {}, 'GET').catch(() => null),
+        callApi<any[]>(`/api/bot/dashboard/by-category${userQS}`, {}, 'GET').catch(() => []),
+        callApi<any>(`/api/bot/dashboard/year-analysis${userQS}`, {}, 'GET').catch(() => null),
       ]);
 
       const categories = byCategory.slice(0, 5).map((c: any) =>
@@ -159,7 +174,7 @@ export async function handleFinancialCommand(
   // --- MES QUE MAIS GASTEI ---
   if (/^(mes\s+que\s+mais\s+gastei|pior\s+mes|maior\s+gasto|quando\s+gastei\s+mais)/i.test(lower)) {
     try {
-      const yearAnalysis = await callApi<any>('/api/bot/dashboard/year-analysis', {}, 'GET').catch(() => null);
+      const yearAnalysis = await callApi<any>(`/api/bot/dashboard/year-analysis${userQS}`, {}, 'GET').catch(() => null);
       
       if (yearAnalysis) {
         let msg = `📊 *Analise do Ano*\n\n`;
@@ -223,6 +238,50 @@ export async function handleFinancialCommand(
       return { handled: true, message: 'Nenhuma meta cadastrada. Use o painel web para criar.' };
     } catch {
       return { handled: true, message: 'Erro ao consultar metas.' };
+    }
+  }
+
+  // --- SAUDE FINANCEIRA DO CASAL ---
+  if (/^(sa[úu]de|indicador|saude\s*financeira|sa[úu]de\s*financeira)$/i.test(lower) ||
+      /^(como está|como ta|como vai)\s*(a\s*)?(sa[úu]de|nossas\s*finan)/i.test(lower)) {
+    try {
+      const h = await callApi<any>(`/api/bot/dashboard/financial-health${userQS}`, {}, 'GET').catch(() => null);
+      if (!h) return { handled: true, message: 'Erro ao calcular a saúde financeira.' };
+
+      const brl = (v: number) => `R$${v.toFixed(2).replace('.', ',')}`;
+      const monthName = (offset: number) => {
+        const d = new Date();
+        d.setDate(1);
+        d.setMonth(d.getMonth() + offset);
+        return d.toLocaleDateString('pt-BR', { month: 'long' }).replace(/^./, (c) => c.toUpperCase());
+      };
+
+      let msg = `🩺 *Saúde Financeira do Casal*\n\n`;
+      msg += `📥 *Renda mensal:* ${brl(h.monthlyIncome)}\n`;
+      msg += `📅 *${monthName(0)}:* compromissos ${brl(h.commitments)} → sobra ${brl(h.leftover)} (${h.leftoverPercent}%)\n`;
+      msg += `🔮 *${monthName(1)} (previsão):* compromissos ${brl(h.nextCommitments)} → sobra ${brl(h.nextLeftover)} (${h.nextLeftoverPercent}%)\n\n`;
+
+      const pct = h.nextLeftoverPercent;
+      const emoji = pct >= 30 ? '🟢' : pct >= 10 ? '🟡' : '🔴';
+      msg += `${emoji} ${pct >= 30 ? 'Saudável' : pct >= 10 ? 'Atenção' : 'Risco'}: previsão de sobra ${pct}% da renda no próximo mês.\n\n`;
+
+      if (h.endingSoon.length > 0) {
+        msg += `🎯 *Parcelas que terminam nos próximos 3 meses (${h.endingSoonCount}):*\n`;
+        for (const p of h.endingSoon.slice(0, 6)) {
+          const name = p.description.length > 28 ? p.description.slice(0, 26) + '…' : p.description;
+          const endMonth = new Date(p.endsAt).toLocaleDateString('pt-BR', { month: 'short' });
+          msg += `• ${name} — ${p.currentInstallment}/${p.totalInstallments} (acaba ${endMonth}, ${brl(p.monthlyAmount)}/mês)\n`;
+        }
+        msg += `\n💰 Liberam ${brl(h.endingSoonMonthly)}/mês até ${monthName(2)}!\n`;
+      }
+
+      if (h.openPurchasesCount > 0) {
+        msg += `\n📦 Parcelas abertas no horizonte: ${h.openPurchasesCount} compras (${brl(h.openPurchasesTotal)} a pagar).`;
+      }
+      return { handled: true, message: msg };
+    } catch (err) {
+      console.error('[cmd] Saúde error:', err);
+      return { handled: true, message: 'Erro ao consultar saúde financeira.' };
     }
   }
 
