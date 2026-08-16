@@ -336,8 +336,10 @@ router.get("/credit-card-total", async (req: Request, res: Response) => {
 
     let total = 0;
     for (const tx of transactions) {
-      // Parcelado: a parcela do mês (amount/totalInstallments); à vista: amount.
-      total += tx.totalInstallments > 1 ? tx.amount / tx.totalInstallments : tx.amount;
+      // amount já é a parcela mensal (Meu Pluggy envia tx.amount = parcela;
+      // totalAmount não vem). À vista (1/1) amount = valor total. O total do
+      // mês = soma das parcelas do mês.
+      total += tx.amount;
     }
 
     res.json({ total, count: transactions.length });
@@ -521,8 +523,10 @@ router.get("/credit-card-detail", async (req: Request, res: Response) => {
     const result = transactions.map((t) => ({
       id: t.id,
       description: t.description,
-      amount: t.amount,
-      installmentAmount: t.totalInstallments > 0 ? t.amount / t.totalInstallments : t.amount,
+      // amount = total da compra (parcela × nº de parcelas); à vista = valor.
+      amount: t.totalInstallments > 1 ? t.amount * t.totalInstallments : t.amount,
+      // installmentAmount = parcela do mês (o que o Meu Pluggy envia).
+      installmentAmount: t.amount,
       date: t.date,
       categoryName: t.category?.name || null,
       paymentMethod: t.paymentMethod || "Cartao",

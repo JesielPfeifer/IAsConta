@@ -303,6 +303,7 @@ export interface PluggyAccount {
   name?: string;
   marketingName?: string;
   number?: string;
+  owner?: string; // Open Finance account holder (e.g. "JESIEL VIANA PFEIFER")
   balance: number;
   currencyCode: string;
   creditData?: {

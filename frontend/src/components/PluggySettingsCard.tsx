@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Link2, RefreshCw, Trash2, Landmark, CheckCircle2, XCircle, Loader2, Webhook } from 'lucide-react';
+import { Link2, RefreshCw, Trash2, Landmark, CheckCircle2, XCircle, Loader2, Webhook, Paperclip } from 'lucide-react';
 import { api } from '../api/client';
 
 interface PluggyConnection {
@@ -55,6 +55,8 @@ export default function PluggySettingsCard() {
   const [syncMessage, setSyncMessage] = useState('');
   const [connecting, setConnecting] = useState(false);
   const [registeringWebhooks, setRegisteringWebhooks] = useState(false);
+  const [attachItemId, setAttachItemId] = useState('');
+  const [attaching, setAttaching] = useState(false);
 
   const loadConnections = useCallback(async () => {
     setLoadingConnections(true);
@@ -210,6 +212,29 @@ export default function PluggySettingsCard() {
     }
   }
 
+  async function handleAttach() {
+    const itemId = attachItemId.trim();
+    if (!itemId || attaching) return;
+    setAttaching(true);
+    setSyncMessage('');
+    try {
+      const result = await api<{ sync: SyncResult; connection: PluggyConnection }>('/api/pluggy/items/attach', {
+        method: 'POST',
+        body: JSON.stringify({ itemId }),
+      });
+      setAttachItemId('');
+      setSyncMessage(
+        `✓ Item anexado e sincronizado: ${result.sync.transactionsCreated} transações, ${result.sync.billsCreated} faturas, ${result.sync.accounts} contas.` +
+          (result.sync.errors.length ? ` ⚠️ ${result.sync.errors.join('; ')}` : '')
+      );
+      await loadConnections();
+    } catch (err: any) {
+      setSyncMessage(`Erro ao anexar: ${err.message}`);
+    } finally {
+      setAttaching(false);
+    }
+  }
+
   async function handleRegisterWebhooks() {
     setRegisteringWebhooks(true);
     setSyncMessage('');
@@ -312,6 +337,32 @@ export default function PluggySettingsCard() {
                 {registeringWebhooks ? <Loader2 className="w-4 h-4 animate-spin" /> : <Webhook className="w-4 h-4 text-emerald-400" />}
                 Ativar Sync Automático (Webhooks)
               </button>
+            </div>
+
+            <div className="bg-white/[0.02] border border-white/5 rounded-xl p-3 space-y-2">
+              <p className="text-xs text-gray-500 leading-relaxed">
+                Já conectou o banco no <span className="text-emerald-400">dashboard.pluggy.ai</span> / Meu Pluggy e o
+                botão acima retornou <code className="text-amber-400">ITEM_USER_ALREADY_EXISTS</code>? Anexe o item
+                existente pelo ID (o mesmo que aparece na URL do item no dashboard).
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <input
+                  type="text"
+                  value={attachItemId}
+                  onChange={(e) => setAttachItemId(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAttach()}
+                  placeholder="itemId (ex: 1498c237-c9b7-4527-a93d-270a769eb8e0)"
+                  className="flex-1 min-w-[220px] bg-white/[0.03] border border-white/10 rounded-xl px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/30"
+                />
+                <button
+                  onClick={handleAttach}
+                  disabled={attaching || !attachItemId.trim()}
+                  className="flex items-center gap-2 bg-white/[0.06] hover:bg-white/[0.1] disabled:opacity-40 text-white px-4 py-2 rounded-xl text-sm font-medium transition-all"
+                >
+                  {attaching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4 text-emerald-400" />}
+                  Anexar Item Existente
+                </button>
+              </div>
             </div>
 
             {syncMessage && (

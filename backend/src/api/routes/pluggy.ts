@@ -149,6 +149,76 @@ router.post("/items", async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/pluggy/items/attach — attach an EXISTING Pluggy item to this user
+// (created on dashboard.pluggy.ai / Meu Pluggy). Unlike POST /items it does
+// NOT create a new item on Pluggy, so it never hits ITEM_USER_ALREADY_EXISTS.
+router.post("/items/attach", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    const { itemId } = req.body as { itemId?: string };
+    if (!itemId || typeof itemId !== "string" || !/^[0-9a-f-]{36}$/i.test(itemId.trim())) {
+      res.status(400).json({ error: "itemId é obrigatório (formato UUID)" });
+      return;
+    }
+    const cleanItemId = itemId.trim();
+
+    const existing = await prisma.bankConnection.findFirst({
+      where: { itemId: cleanItemId },
+    });
+    if (existing) {
+      res.status(409).json({ error: "Este item já está vinculado a uma conta" });
+      return;
+    }
+
+    const creds = await credsForUser(user.id);
+    if (!creds) {
+      res.status(400).json({ error: "Pluggy não configurado para este usuário" });
+      return;
+    }
+    const client = createPluggyClient(creds);
+
+    // Confirm the item exists on Pluggy before registering it locally
+    let item;
+    try {
+      item = await client.getItem(cleanItemId);
+    } catch (err) {
+      res.status(404).json({
+        error: `Item não encontrado na Pluggy: ${err instanceof PluggyError ? err.message : "erro desconhecido"}`,
+      });
+      return;
+    }
+
+    const connection = await prisma.bankConnection.create({
+      data: {
+        bankName: item.connector?.name || "Conexão Pluggy",
+        itemId: cleanItemId,
+        connectorId: item.connector?.id ?? null,
+        connectorName: item.connector?.name || null,
+        status: item.status,
+        userId: user.id,
+      },
+    });
+
+    // Sync immediately so the user sees data right away
+    const result = await syncItem(cleanItemId, user.id);
+    res.status(201).json({
+      connection,
+      sync: {
+        status: result.status,
+        accounts: result.accounts,
+        transactionsCreated: result.transactionsCreated,
+        transactionsUpdated: result.transactionsUpdated,
+        billsCreated: result.billsCreated,
+        billsUpdated: result.billsUpdated,
+        errors: result.errors,
+      },
+    });
+  } catch (err) {
+    console.error("[pluggy] attach item:", err);
+    res.status(500).json({ error: err instanceof PluggyError ? err.message : "Erro interno" });
+  }
+});
+
 // GET /api/pluggy/items — list user connections (with latest item status)
 router.get("/items", async (req: Request, res: Response) => {
   try {

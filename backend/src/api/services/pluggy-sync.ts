@@ -86,6 +86,34 @@ function bankNameFromAccountName(raw: string): string | null {
   return null;
 }
 
+/**
+ * Normalize a name for comparison: lowercase, no accents, no punctuation.
+ */
+function normName(s: string | null | undefined): string {
+  return (s || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Resolve which person owns a Pluggy account based on the Open Finance
+ * holder name (account.owner). Compares against the couple's names — no
+ * hardcoded names. Returns "HUSBAND" | "WIFE" | null.
+ */
+function resolveOwnerPerson(
+  accountOwner: string | null | undefined,
+  user: { name: string },
+  spouse: { name: string } | null | undefined
+): "HUSBAND" | "WIFE" | null {
+  const owner = normName(accountOwner);
+  if (!owner) return null;
+  if (normName(user.name) && owner.includes(normName(user.name))) return "HUSBAND";
+  if (spouse?.name && owner.includes(normName(spouse.name))) return "WIFE";
+  return null;
+}
+
 function normalizePaymentMethod(account: PluggyAccount, connectorName?: string | null): string {
   // Meu Pluggy proxy: account.name carries the REAL bank name (e.g. "CAIXA",
   // "CAIXA VISA INFINITE CREDITO", "NUBANK"). Strip card product suffixes so
@@ -230,6 +258,14 @@ export async function syncItem(itemId: string, userId: string): Promise<SyncResu
   }
   const client = createPluggyClient(creds);
 
+  // Couple names — used to link transactions to the account owner
+  // (HUSBAND/WIFE) based on the Open Finance holder name (account.owner).
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { spouse: { select: { name: true } } },
+  });
+  const spouse = user?.spouse || null;
+
   // 1. Item status from Pluggy
   let pluggyItem;
   try {
@@ -272,10 +308,13 @@ export async function syncItem(itemId: string, userId: string): Promise<SyncResu
 
   for (const account of accounts) {
     try {
+      // Owner of this account (from Open Finance holder name) — links the
+      // account's transactions to the husband/wife directly.
+      const ownerPerson = user ? resolveOwnerPerson(account.owner, user, spouse) : null;
       if (isBankAccount(account)) {
-        await syncBankAccount(client, account, userId, result, pluggyItem.connector?.name);
+        await syncBankAccount(client, account, userId, result, pluggyItem.connector?.name, ownerPerson);
       } else if (isCreditCardAccount(account)) {
-        await syncCreditCard(client, account, userId, result, pluggyItem.connector?.name, itemBankName);
+        await syncCreditCard(client, account, userId, result, pluggyItem.connector?.name, itemBankName, ownerPerson);
       }
       // Other account types (investment, loan) are ignored for now
     } catch (err) {
@@ -304,7 +343,8 @@ async function syncBankAccount(
   account: PluggyAccount,
   userId: string,
   result: SyncResult,
-  connectorName?: string
+  connectorName?: string,
+  ownerPerson?: "HUSBAND" | "WIFE" | null
 ): Promise<void> {
   const transactions = await client.listTransactions(account.id);
   const paymentMethod = normalizePaymentMethod(account, connectorName);
@@ -356,6 +396,9 @@ async function syncBankAccount(
       date: new Date(tx.date),
       source: "PLUGGY" as const,
       paymentMethod,
+      // Account owner (Open Finance holder name) → link to husband/wife.
+      person: ownerPerson || null,
+      isShared: false,
       isFixed: false,
       categoryId,
       pluggyAccountId: account.id,
@@ -369,11 +412,18 @@ async function syncBankAccount(
         existing.amount !== data.amount ||
         existing.description !== data.description ||
         existing.date.getTime() !== data.date.getTime() ||
-        existing.type !== type;
+        existing.type !== type ||
+        existing.person !== data.person;
       if (changed) {
         await prisma.transaction.update({
           where: { id: existing.id },
-          data: { amount: data.amount, description: data.description, date: data.date, type },
+          data: {
+            amount: data.amount,
+            description: data.description,
+            date: data.date,
+            type,
+            person: data.person,
+          },
         });
         result.transactionsUpdated++;
       }
@@ -394,7 +444,8 @@ async function syncCreditCard(
   userId: string,
   result: SyncResult,
   connectorName?: string,
-  itemBankName?: string | null
+  itemBankName?: string | null,
+  ownerPerson?: "HUSBAND" | "WIFE" | null
 ): Promise<void> {
   // --- Faturas (bills) ---
   const bills = await client.listBills(account.id);
@@ -468,6 +519,9 @@ async function syncCreditCard(
       date: new Date(tx.date),
       source: "PLUGGY" as const,
       paymentMethod,
+      // Account owner (Open Finance holder name) → link to husband/wife.
+      person: ownerPerson || null,
+      isShared: false,
       isFixed: false,
       isCreditCard: true,
       billId: meta.billId ? (billByExternalId.get(meta.billId) ?? null) : null,
@@ -482,12 +536,14 @@ async function syncCreditCard(
     };
 
     if (existing) {
-      // Keep the user's category/person edits; update only sync-driven fields
+      // Keep the user's category edits; update only sync-driven fields
+      // (person is sync-driven too: the account owner decides husband/wife).
       const changed =
         existing.amount !== data.amount ||
         existing.description !== data.description ||
         existing.date.getTime() !== data.date.getTime() ||
         existing.billId !== data.billId ||
+        existing.person !== data.person ||
         existing.currentInstallment !== data.currentInstallment ||
         existing.totalInstallments !== data.totalInstallments;
       if (changed) {
@@ -498,6 +554,7 @@ async function syncCreditCard(
             description: data.description,
             date: data.date,
             billId: data.billId,
+            person: data.person,
             currentInstallment: data.currentInstallment,
             totalInstallments: data.totalInstallments,
             installmentGroupId: data.installmentGroupId ?? existing.installmentGroupId,
