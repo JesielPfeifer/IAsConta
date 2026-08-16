@@ -454,10 +454,10 @@ router.post("/webhooks/register", async (req: Request, res: Response) => {
       return;
     }
     const client = createPluggyClient(creds);
-    // Dedicated secret for the Pluggy integration (falls back to
-    // WEBHOOK_SECRET for deployments that haven't split them yet) — a leak
-    // here must not forge the Evolution webhook.
-    const secret = process.env.PLUGGY_WEBHOOK_SECRET || process.env.WEBHOOK_SECRET;
+    // Secret DEDICADO e obrigatório para a integração Pluggy (sem fallback —
+    // validação no startup do servidor): uma divulgação aqui não forja o
+    // webhook do Evolution.
+    const secret = process.env.PLUGGY_WEBHOOK_SECRET;
     const headers = secret ? { "x-webhook-secret": secret } : undefined;
 
     const results: Array<{ event: string; id?: string; error?: string }> = [];
@@ -481,12 +481,12 @@ router.post("/webhooks/register", async (req: Request, res: Response) => {
 // Webhook (public, validated via header X-Webhook-Secret)
 // ---------------------------------------------------------------
 router.post("/webhook", async (req: Request, res: Response) => {
-  const expected =
-    process.env.PLUGGY_WEBHOOK_SECRET || process.env.WEBHOOK_SECRET;
-  // Fail fast when the secret is not configured: skipping the check would
-  // accept unauthenticated webhook requests and let anyone trigger syncs.
+  const expected = process.env.PLUGGY_WEBHOOK_SECRET;
+  // Fail fast when the secret is not configured (startup also refuses to
+  // boot without it): skipping the check would accept unauthenticated
+  // webhook requests and let anyone trigger syncs.
   if (!expected) {
-    console.error("[pluggy-webhook] FATAL: WEBHOOK_SECRET not configured");
+    console.error("[pluggy-webhook] FATAL: PLUGGY_WEBHOOK_SECRET not configured");
     res.status(500).json({ error: "Server misconfiguration" });
     return;
   }
