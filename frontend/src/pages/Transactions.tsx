@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useTransactions, type Transaction } from '../hooks/useTransactions';
 import TransactionForm from '../components/TransactionForm';
 import FileImport from '../components/FileImport';
 import ConfirmModal from '../components/ConfirmModal';
+import { api } from '../api/client';
 import { Plus, Upload, Pencil, Trash2, Search, Check, X, ChevronDown, Calendar, Filter, Users, type LucideIcon } from 'lucide-react';
 import dayjs from 'dayjs';
 
@@ -160,14 +161,21 @@ export default function Transactions() {
     { value: 'COUPLE', label: 'Casal' },
   ];
 
-  const paymentOptions = [
+  const [paymentMethods, setPaymentMethods] = useState<{ name: string; type: string }[]>([]);
+
+  useEffect(() => {
+    api('/api/payment-methods')
+      .then((data) => setPaymentMethods(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, []);
+
+  const paymentOptions = useMemo(() => [
     { value: '', label: 'Todos os pagamentos' },
-    { value: 'DEBITO', label: 'Débito' },
-    { value: 'CAIXA', label: 'Caixa' },
-    { value: 'NUBANK', label: 'Nubank' },
-    { value: 'CREDITO_3', label: 'Crédito 3' },
-    { value: 'CREDITO_4', label: 'Crédito 4' },
-  ];
+    ...paymentMethods.map((m) => ({
+      value: m.name,
+      label: `${m.name}${m.type === 'CARD' ? ' (Cartão)' : ''}`,
+    })),
+  ], [paymentMethods]);
 
   return (
     <div className="space-y-6">

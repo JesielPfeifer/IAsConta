@@ -279,13 +279,20 @@ router.get("/credit-card-total", async (req: Request, res: Response) => {
     const user = req.user!;
     const { start, end } = getMonthRange(req.query.month as string);
 
+    // Payment methods configured as CARD by the user (Nubank, Caixa, ...)
+    const cardMethods = await prisma.paymentMethod.findMany({
+      where: { userId: user.id, type: "CARD" },
+      select: { name: true },
+    });
+    const cardNames = cardMethods.map((m) => m.name);
+
     const transactions = await prisma.transaction.findMany({
       where: {
         userId: user.id,
         type: "EXPENSE",
         date: { gte: start, lt: end },
         OR: [
-          { paymentMethod: { in: ["NUBANK", "CREDITO_3", "CREDITO_4", "CREDITO"] } },
+          { paymentMethod: { in: cardNames } },
           { isCreditCard: true },
         ],
       },
@@ -454,13 +461,20 @@ router.get("/credit-card-detail", async (req: Request, res: Response) => {
     const user = req.user!;
     const { start, end } = getMonthRange(req.query.month as string);
 
+    // Payment methods configured as CARD by the user
+    const cardMethods = await prisma.paymentMethod.findMany({
+      where: { userId: user.id, type: "CARD" },
+      select: { name: true },
+    });
+    const cardNames = cardMethods.map((m) => m.name);
+
     const transactions = await prisma.transaction.findMany({
       where: {
         userId: user.id,
         type: "EXPENSE",
         date: { gte: start, lt: end },
         OR: [
-          { paymentMethod: { in: ["NUBANK", "CREDITO_3", "CREDITO_4", "CREDITO"] } },
+          { paymentMethod: { in: cardNames } },
           { isCreditCard: true },
         ],
       },

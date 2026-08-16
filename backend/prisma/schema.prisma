@@ -28,6 +28,8 @@ model User {
   investments     Investment[]
   whatsappUsers   WhatsAppUser[]
   bankConnections BankConnection[]
+  paymentMethods  PaymentMethod[]
+  fixedIncomes    FixedIncome[]
 }
 
 model Transaction {
@@ -202,4 +204,34 @@ enum Source {
   NUBANK_CSV
   CAIXA_PDF
   PLUGGY
+}
+
+enum PaymentMethodType {
+  CARD // cartão de crédito (Nubank, Caixa...)
+  ACCOUNT // valor em conta (débito, dinheiro, Pix)
+}
+
+model PaymentMethod {
+  id        String            @id @default(uuid())
+  name      String // display name, ex: "Caixa", "Nubank", "Dinheiro"
+  type      PaymentMethodType
+  active    Boolean           @default(true)
+  userId    String
+  user      User              @relation(fields: [userId], references: [id])
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@unique([userId, name])
+}
+
+model FixedIncome {
+  id        String   @id @default(uuid())
+  name      String // ex: "Salário Jesiel", "Aluguel recebido"
+  amount    Float
+  person    Person?  // dono da renda (HUSBAND/WIFE/COUPLE)
+  active    Boolean  @default(true)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

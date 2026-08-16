@@ -101,7 +101,27 @@ function isCreditCardBillPayment(description: string): boolean {
     .toLowerCase();
   return /(fatura|invoice).*(cartao|card|credito|visa|master|elo)/.test(d) ||
     /(cartao|card).*(fatura|invoice)/.test(d) ||
-    /pagamento\s+(de\s+)?fatura/.test(d);
+    /pagamento\s+(de\s+)?fatura/.test(d) ||
+    // Boleto/fatura payment markers: PAGTO.BOLETO, PGTO.BOLETO, PAG BOLETO,
+    // PAGAMENTO DE BOLETO... (amount check against faturas happens separately)
+    (d.includes("boleto") && /\b(pag|pgto|pagto|pagamento)\b/.test(d)) ||
+    (d.includes("fatura") && /\b(pag|pgto|pagto|pagamento)\b/.test(d));
+}
+
+/**
+ * Bank-account transaction that pays a credit card fatura via boleto
+ * ("PAGTO.BOLETO", "PAGAMENTO DE BOLETO"...). Detected by description + the
+ * amount matching one of the user's credit card bills (faturas). Without the
+ * amount check, any boleto payment would be wrongly excluded.
+ */
+async function isCreditCardBillPaymentByAmount(
+  tx: PluggyTransaction,
+  bills: Array<{ amount: number }>
+): Promise<boolean> {
+  if (!isCreditCardBillPayment(tx.description)) return false;
+  const amount = Math.abs(tx.amount);
+  // Matches a fatura value within R$ 0,01 (boleto = fatura exact value).
+  return bills.some((b) => Math.abs(b.amount - amount) < 0.01);
 }
 
 /**
@@ -236,14 +256,25 @@ async function syncBankAccount(
   const transactions = await client.listTransactions(account.id);
   const paymentMethod = normalizePaymentMethod(account, connectorName);
 
+  // Faturas do usuário — usadas para detectar pagamento de fatura via boleto
+  // (PAGTO.BOLETO com valor igual ao da fatura) e não duplicar o gasto.
+  const userBills = await prisma.bill.findMany({
+    where: { userId, source: "PLUGGY" },
+    select: { amount: true },
+  });
+
   for (const tx of transactions) {
     // PENDING purchases (open credit-card cycle / unconfirmed debit) are
     // imported too — dedupe by externalId prevents duplicates once POSTED.
 
+    // Invoice-balance marker ("TOTAL DA FATURA ANTERIOR") — not a real
+    // transaction; importing it would inflate month totals.
+    if (isInvoiceBalanceMarker(tx)) continue;
+
     // Skip credit card bill payments: the fatura is already represented as a
     // Bill row (source PLUGGY) and counts the expense once. Importing the
     // payment here too would double-count it.
-    if (isCreditCardBillPayment(tx.description)) {
+    if (await isCreditCardBillPaymentByAmount(tx, userBills)) {
       continue;
     }
 
@@ -313,10 +344,22 @@ async function syncCreditCard(
   const transactions = await client.listTransactions(account.id);
   const paymentMethod = normalizePaymentMethod(account, connectorName);
 
+  // Faturas do usuário — pagamento da fatura via boleto aparece TAMBÉM na
+  // conta do cartão ("PAGTO.BOLETO", "PGTO.BOLETO REGISTRADO" com valor da
+  // fatura). Ignorar para não duplicar o gasto (fatura já conta 1x).
+  const userBills = await prisma.bill.findMany({
+    where: { userId, source: "PLUGGY" },
+    select: { amount: true },
+  });
+
   for (const tx of transactions) {
     // PENDING purchases are imported too (dedupe by externalId prevents
     // duplicates once POSTED); only the invoice-balance marker is skipped.
     if (isInvoiceBalanceMarker(tx)) continue;
+
+    // Bill payment rows on the credit card account (PAGTO.BOLETO with the
+    // fatura value) — the fatura already counts the expense once.
+    if (await isCreditCardBillPaymentByAmount(tx, userBills)) continue;
 
     const existing = await prisma.transaction.findUnique({
       where: { userId_externalId: { userId, externalId: tx.id } },

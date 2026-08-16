@@ -3,6 +3,7 @@ import { Loader2, Smartphone, Save, Users, Bot, MessageCircle, Search } from 'lu
 import { api } from '../api/client';
 import WhatsAppInstanceCard from '../components/WhatsAppInstanceCard';
 import PluggySettingsCard from '../components/PluggySettingsCard';
+import PaymentMethodsCard from '../components/PaymentMethodsCard';
 
 interface UserSettings {
   groqApiKey: string;
@@ -92,6 +93,8 @@ export default function Setup() {
       <WhatsAppInstanceCard />
 
       <PluggySettingsCard />
+
+      <PaymentMethodsCard />
 
       {/* WhatsApp Group */}
       <section className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-4">
