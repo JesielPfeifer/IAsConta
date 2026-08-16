@@ -138,7 +138,7 @@ export default function PluggySettingsCard() {
       if (!window.PluggyConnect) {
         await new Promise<void>((resolve, reject) => {
           const s = document.createElement('script');
-          s.src = 'https://connect.pluggy.ai/widget.js';
+          s.src = 'https://cdn.pluggy.ai/pluggy-connect/v2.8.2/pluggy-connect.js';
           s.onload = () => resolve();
           s.onerror = () => reject(new Error('Falha ao carregar o widget Pluggy'));
           document.head.appendChild(s);
