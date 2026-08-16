@@ -301,6 +301,140 @@ router.get("/last-7-days", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/bot/dashboard/financial-health — couple's financial health:
+// fixed monthly income, current commitments (faturas + open installments),
+// leftover after commitments, and installments about to finish (which free
+// up money in the coming months).
+router.get("/financial-health", async (req: Request, res: Response) => {
+  try {
+    const user = await getBotUser();
+    const { start, end } = getCurrentMonthRange();
+
+    const [fixedIncomes, faturas, installments, cardMonthTx] = await Promise.all([
+      prisma.fixedIncome.findMany({
+        where: { userId: user.id },
+        select: { name: true, amount: true, person: true },
+      }),
+      prisma.bill.findMany({
+        where: {
+          userId: user.id,
+          dueDate: { gte: start, lt: end },
+          isPaid: false,
+        },
+        select: { name: true, amount: true, dueDate: true },
+      }),
+      // Open installments (parcelas) — grouped by purchase. Amount stored is
+      // the monthly parcel value; remaining = parcels yet to be paid.
+      prisma.transaction.findMany({
+        where: {
+          userId: user.id,
+          source: "PLUGGY",
+          totalInstallments: { gt: 1 },
+        },
+        select: {
+          description: true,
+          amount: true,
+          currentInstallment: true,
+          totalInstallments: true,
+          installmentGroupId: true,
+          paymentMethod: true,
+          isCreditCard: true,
+          date: true,
+        },
+      }),
+      // Card purchases of the current month not yet inside a fatura (open
+      // billing cycle) — they become the next fatura, so they count as a
+      // monthly commitment too.
+      prisma.transaction.findMany({
+        where: {
+          userId: user.id,
+          source: "PLUGGY",
+          isCreditCard: true,
+          billId: null,
+          date: { gte: start, lt: end },
+        },
+        select: { amount: true },
+      }),
+    ]);
+
+    // Keep only open installments (current < total)
+    const open = installments.filter((tx) => tx.currentInstallment < tx.totalInstallments);
+
+    // Group installments by purchase (installmentGroupId)
+    const groups = new Map<string, (typeof open)[number][]>();
+    for (const tx of open) {
+      const key = tx.installmentGroupId || `${tx.description}|${tx.paymentMethod}`;
+      const g = groups.get(key);
+      if (g) g.push(tx);
+      else groups.set(key, [tx]);
+    }
+
+    const openPurchases = Array.from(groups.values())
+      .map((txs) => {
+        // Latest installment row of the purchase
+        const latest = txs.reduce((a, b) =>
+          b.currentInstallment > a.currentInstallment ? b : a
+        );
+        const remaining = latest.totalInstallments - latest.currentInstallment;
+        return {
+          description: latest.description,
+          paymentMethod: latest.paymentMethod,
+          isCreditCard: latest.isCreditCard,
+          currentInstallment: latest.currentInstallment,
+          totalInstallments: latest.totalInstallments,
+          monthlyAmount: latest.amount,
+          remaining,
+          remainingTotal: latest.amount * remaining,
+        };
+      })
+      .sort((a, b) => a.remaining - b.remaining);
+
+    // Installments finishing soon: 1-2 parcels left AND the purchase is well
+    // underway (already paid >= 3 parcels) — a fresh 1/2 purchase is NOT
+    // "ending", it just started.
+    const endingSoon = openPurchases.filter(
+      (p) => p.remaining <= 2 && p.currentInstallment >= 3
+    );
+    const endingSoonMonthly = endingSoon.reduce((s, p) => s + p.monthlyAmount, 0);
+
+    const monthlyIncome = fixedIncomes.reduce((s, i) => s + i.amount, 0);
+    const faturasTotal = faturas.reduce((s, b) => s + b.amount, 0);
+    // Card purchases of the current month not yet in a fatura (open cycle)
+    const cardMonthTotal = cardMonthTx.reduce((s, t) => s + t.amount, 0);
+    // Monthly commitment: faturas of the month + open card cycle purchases +
+    // monthly parcels of NON-card purchases (checking-account installments
+    // like "Tio jairo" are paid directly each month).
+    const nonCardMonthlyParcels = openPurchases
+      .filter((p) => !p.isCreditCard)
+      .reduce((s, p) => s + p.monthlyAmount, 0);
+    const commitments = faturasTotal + cardMonthTotal + nonCardMonthlyParcels;
+    const leftover = monthlyIncome - commitments;
+
+    res.json({
+      monthlyIncome,
+      monthlyIncomeByPerson: fixedIncomes,
+      faturas: faturas.map((f) => ({
+        name: f.name,
+        amount: f.amount,
+        dueDate: f.dueDate,
+      })),
+      faturasTotal,
+      commitments,
+      leftover,
+      leftoverPercent: monthlyIncome > 0 ? Math.round((leftover / monthlyIncome) * 100) : 0,
+      openPurchases: openPurchases.slice(0, 15),
+      openPurchasesCount: openPurchases.length,
+      openPurchasesTotal: openPurchases.reduce((s, p) => s + p.remainingTotal, 0),
+      endingSoon: endingSoon.slice(0, 10),
+      endingSoonCount: endingSoon.length,
+      endingSoonMonthly,
+    });
+  } catch (err) {
+    console.error("[botDashboard] financial-health error:", err);
+    res.status(500).json({ error: "Erro ao calcular saúde financeira" });
+  }
+});
+
 router.get("/upcoming-bills", async (req: Request, res: Response) => {
   try {
     const user = await getBotUser();

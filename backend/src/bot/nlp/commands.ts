@@ -11,6 +11,7 @@ const COMMANDS_HELP = `📋 *Comandos disponiveis:*
 • saldo — Resumo financeiro do mes
 • gastos [categoria] — Gastos por categoria  
 • contas a vencer — Proximas contas
+• saude — Saude financeira do casal (sobra, parcelas acabando)
 • onde economizar — Dicas de economia
 • mes que mais gastei — Pior mes do ano
 • investimentos — Resumo investimentos
@@ -223,6 +224,42 @@ export async function handleFinancialCommand(
       return { handled: true, message: 'Nenhuma meta cadastrada. Use o painel web para criar.' };
     } catch {
       return { handled: true, message: 'Erro ao consultar metas.' };
+    }
+  }
+
+  // --- SAUDE FINANCEIRA DO CASAL ---
+  if (/^(sa[úu]de|indicador|saude\s*financeira|sa[úu]de\s*financeira)$/i.test(lower) ||
+      /^(como está|como ta|como vai)\s*(a\s*)?(sa[úu]de|nossas\s*finan)/i.test(lower)) {
+    try {
+      const h = await callApi<any>('/api/bot/dashboard/financial-health', {}, 'GET').catch(() => null);
+      if (!h) return { handled: true, message: 'Erro ao calcular a saúde financeira.' };
+
+      const brl = (v: number) => `R$${v.toFixed(2).replace('.', ',')}`;
+      let msg = `🩺 *Saúde Financeira do Casal*\n\n`;
+      msg += `📥 *Renda mensal:* ${brl(h.monthlyIncome)}\n`;
+      if (h.faturasTotal > 0) msg += `💳 *Faturas do mês:* ${brl(h.faturasTotal)}\n`;
+      msg += `🔒 *Compromissos:* ${brl(h.commitments)}\n`;
+      msg += `💵 *Sobra mensal:* ${brl(h.leftover)} (${h.leftoverPercent}% da renda)\n\n`;
+
+      const emoji = h.leftoverPercent >= 30 ? '🟢' : h.leftoverPercent >= 10 ? '🟡' : '🔴';
+      msg += `${emoji} ${h.leftoverPercent >= 30 ? 'Saudável' : h.leftoverPercent >= 10 ? 'Atenção' : 'Risco'}: sobra ${h.leftoverPercent}% da renda.\n\n`;
+
+      if (h.endingSoon.length > 0) {
+        msg += `🎯 *Parcelas que estão acabando (últimas ${h.endingSoonCount} compras):*\n`;
+        for (const p of h.endingSoon.slice(0, 6)) {
+          const name = p.description.length > 28 ? p.description.slice(0, 26) + '…' : p.description;
+          msg += `• ${name} — ${p.currentInstallment}/${p.totalInstallments} (${brl(p.monthlyAmount)}/mês)\n`;
+        }
+        msg += `\n💰 Liberam ${brl(h.endingSoonMonthly)}/mês quando terminarem!\n`;
+      }
+
+      if (h.openPurchasesCount > 0) {
+        msg += `\n📦 Parcelas abertas: ${h.openPurchasesCount} compras (${brl(h.openPurchasesTotal)} a pagar no total).`;
+      }
+      return { handled: true, message: msg };
+    } catch (err) {
+      console.error('[cmd] Saúde error:', err);
+      return { handled: true, message: 'Erro ao consultar saúde financeira.' };
     }
   }
 
