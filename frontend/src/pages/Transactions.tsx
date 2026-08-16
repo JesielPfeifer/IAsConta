@@ -294,7 +294,14 @@ export default function Transactions() {
                             <span className="text-gray-500">-</span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-gray-400">{tx.paymentMethod || '-'}</td>
+                        <td className="px-4 py-3 text-gray-400">
+                          {tx.paymentMethod || '-'}
+                          {tx.isCreditCard && (
+                            <span className="ml-2 inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-violet-500/10 text-violet-300 border border-violet-500/20">
+                              Cartão
+                            </span>
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-gray-400">{personLabel[tx.person || ''] || tx.person}</td>
                         <td className="px-4 py-3 text-gray-400">
                           {tx.totalInstallments && tx.totalInstallments > 1

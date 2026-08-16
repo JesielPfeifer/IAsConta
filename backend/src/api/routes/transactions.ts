@@ -68,14 +68,9 @@ router.use(authMiddleware);
 router.get("/", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
-    const { month, categoryId, person, type, source, isShared, paymentMethod, includeBill } = req.query;
+    const { month, categoryId, person, type, source, isShared, paymentMethod } = req.query;
 
     const where: Record<string, unknown> = { userId: user.id };
-
-    // By default, transactions linked to a credit card fatura (billId) are
-    // excluded: the Bill row already counts that expense. Pass includeBill=true
-    // to see them (e.g. fatura detailing).
-    if (includeBill !== "true") where.billId = null;
 
     if (month) {
       const startOfMonth = new Date(`${month}-01T00:00:00.000Z`);

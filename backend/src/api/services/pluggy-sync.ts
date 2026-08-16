@@ -57,6 +57,22 @@ export interface SyncResult {
 }
 
 function normalizePaymentMethod(account: PluggyAccount, connectorName?: string | null): string {
+  // Meu Pluggy proxy: account.name carries the REAL bank name (e.g. "CAIXA",
+  // "CAIXA VISA INFINITE CREDITO", "NUBANK"). Strip card product suffixes so
+  // all purchases of the same bank share one payment method (e.g. "CAIXA").
+  if (connectorName && connectorName.toLowerCase().includes("meupluggy")) {
+    const raw = account.name || "";
+    const cleaned = raw
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toUpperCase()
+      .replace(/\b(VISA|MASTERCARD|MASTER|ELO|HIPERCARD|AMEX|AMERICAN\s*EXPRESS|CREDITO|CREDIT|CARD|INTERNACIONAL|INTERNATIONAL|INFINITE|INFINITY|BLACK|PLATINUM|GOLD|SIGNATURE|CLASSIC|UNICLASS|PERSONALITE|PERSONALIZED|NACIONAL|NACIONAL\s*INTERNACIONAL|ESTILO|OURO|STANDARD|BASIC|BASICO)\b/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const name = cleaned.replace(/\s+/g, "_");
+    if (name) return name;
+    return "CARTAO";
+  }
   if (connectorName) {
     const cleaned = connectorName
       .normalize("NFD")

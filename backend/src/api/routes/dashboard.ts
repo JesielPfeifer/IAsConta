@@ -277,22 +277,24 @@ router.get("/by-payment", async (req: Request, res: Response) => {
 router.get("/credit-card-total", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
+    const { start, end } = getMonthRange(req.query.month as string);
 
     const transactions = await prisma.transaction.findMany({
       where: {
         userId: user.id,
         type: "EXPENSE",
+        date: { gte: start, lt: end },
         OR: [
-          { paymentMethod: { in: ["NUBANK", "CREDITO_3", "CREDITO_4"] } },
+          { paymentMethod: { in: ["NUBANK", "CAIXA", "CREDITO_3", "CREDITO_4", "CREDITO"] } },
           { isCreditCard: true },
         ],
-        totalInstallments: { gt: 1 },
       },
     });
 
     let total = 0;
     for (const tx of transactions) {
-      total += tx.amount / tx.totalInstallments;
+      // Parcelado: a parcela do mês (amount/totalInstallments); à vista: amount.
+      total += tx.totalInstallments > 1 ? tx.amount / tx.totalInstallments : tx.amount;
     }
 
     res.json({ total, count: transactions.length });
@@ -461,7 +463,6 @@ router.get("/credit-card-detail", async (req: Request, res: Response) => {
           { paymentMethod: { in: ["NUBANK", "CAIXA", "CREDITO_3", "CREDITO_4", "CREDITO"] } },
           { isCreditCard: true },
         ],
-        totalInstallments: { gt: 1 },
       },
       include: { category: true },
       orderBy: { date: "desc" },
