@@ -56,12 +56,49 @@ export interface SyncResult {
   errors: string[];
 }
 
+/** Bank aliases seen in Meu Pluggy account names → clean display name. */
+const BANK_ALIASES: Array<[RegExp, string]> = [
+  [/NU\s*PAGAMENTOS|NUBANK|NU\b/i, "NUBANK"],
+  [/CAIXA\s*ECONOMICA|CAIXA\b/i, "CAIXA"],
+  [/BANCO\s*DO\s*BRASIL|\bBB\b/i, "BANCO DO BRASIL"],
+  [/ITAU/i, "ITAU"],
+  [/BRADESCO/i, "BRADESCO"],
+  [/SANTANDER/i, "SANTANDER"],
+  [/INTER\b|BANCO\s*INTER/i, "INTER"],
+  [/SICREDI/i, "SICREDI"],
+  [/SICOOB/i, "SICOOB"],
+  [/MERCADO\s*PAGO|MERCADOPAGO/i, "MERCADO PAGO"],
+  [/PAGSEGURO|PAGBANK/i, "PAGBANK"],
+  [/C6\s*BANK|C6\b/i, "C6"],
+  [/NEON/i, "NEON"],
+  [/SOFISA/i, "SOFISA"],
+  [/ORIGINAL/i, "ORIGINAL"],
+  [/BANCO\s*PAN|\bPAN\b/i, "PAN"],
+  [/BANRISUL/i, "BANRISUL"],
+  [/BRADESCO/i, "BRADESCO"],
+];
+
+function bankNameFromAccountName(raw: string): string | null {
+  if (!raw) return null;
+  for (const [re, name] of BANK_ALIASES) {
+    if (re.test(raw)) return name;
+  }
+  return null;
+}
+
 function normalizePaymentMethod(account: PluggyAccount, connectorName?: string | null): string {
   // Meu Pluggy proxy: account.name carries the REAL bank name (e.g. "CAIXA",
   // "CAIXA VISA INFINITE CREDITO", "NUBANK"). Strip card product suffixes so
   // all purchases of the same bank share one payment method (e.g. "CAIXA").
   if (connectorName && connectorName.toLowerCase().includes("meupluggy")) {
     const raw = account.name || "";
+
+    // 1) Known bank alias (handles "Nu Pagamentos S.A. - Instituição de
+    //    Pagamento" → NUBANK, "platinum" → NUBANK via account-level fallback
+    //    is done by the caller; here aliases win for the raw name).
+    const alias = bankNameFromAccountName(raw);
+    if (alias) return alias.replace(/\s+/g, "_");
+
     const cleaned = raw
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
@@ -217,12 +254,20 @@ export async function syncItem(itemId: string, userId: string): Promise<SyncResu
   const accounts = await client.listAccounts(itemId);
   result.accounts = accounts.length;
 
+  // Bank of the item: from the first BANK account with a recognizable name
+  // (e.g. "Nu Pagamentos S.A." → NUBANK). Used as fallback for credit cards
+  // whose account.name is generic ("platinum", "gold"...).
+  const itemBankName =
+    accounts
+      .map((a) => bankNameFromAccountName(a.name || ""))
+      .find((n) => !!n) || null;
+
   for (const account of accounts) {
     try {
       if (isBankAccount(account)) {
         await syncBankAccount(client, account, userId, result, pluggyItem.connector?.name);
       } else if (isCreditCardAccount(account)) {
-        await syncCreditCard(client, account, userId, result, pluggyItem.connector?.name);
+        await syncCreditCard(client, account, userId, result, pluggyItem.connector?.name, itemBankName);
       }
       // Other account types (investment, loan) are ignored for now
     } catch (err) {
@@ -332,7 +377,8 @@ async function syncCreditCard(
   account: PluggyAccount,
   userId: string,
   result: SyncResult,
-  connectorName?: string
+  connectorName?: string,
+  itemBankName?: string | null
 ): Promise<void> {
   // --- Faturas (bills) ---
   const bills = await client.listBills(account.id);
@@ -342,7 +388,12 @@ async function syncCreditCard(
 
   // --- Transactions (purchases) ---
   const transactions = await client.listTransactions(account.id);
-  const paymentMethod = normalizePaymentMethod(account, connectorName);
+  let paymentMethod = normalizePaymentMethod(account, connectorName);
+  // Card account name is generic ("platinum", "gold") — use the item's bank
+  // (from its checking account) so the payment method reads "NUBANK".
+  if (paymentMethod === "CARTAO" && itemBankName) {
+    paymentMethod = itemBankName;
+  }
 
   // Faturas do usuário — pagamento da fatura via boleto aparece TAMBÉM na
   // conta do cartão ("PAGTO.BOLETO", "PGTO.BOLETO REGISTRADO" com valor da
