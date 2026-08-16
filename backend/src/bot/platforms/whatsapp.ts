@@ -245,9 +245,19 @@ export async function disconnectInstance(instanceName?: string, userId?: string)
   }
 }
 
-// Cache for group list — per-instance
+// Cache for group list — per-instance (bounded: entries are removed when
+// stale, and the map is capped to avoid unbounded growth with one entry per
+// user that ever searched).
 const groupCacheMap = new Map<string, { groups: any[]; timestamp: number }>();
 const GROUP_CACHE_TTL = 600_000; // 10 minutes
+const GROUP_CACHE_MAX = 500;
+
+function groupCacheEvictIfNeeded(): void {
+  if (groupCacheMap.size >= GROUP_CACHE_MAX) {
+    const oldest = groupCacheMap.keys().next().value;
+    if (oldest) groupCacheMap.delete(oldest);
+  }
+}
 
 async function refreshGroupCache(instanceName?: string): Promise<void> {
   const name = instanceName || DEFAULT_INSTANCE;
@@ -259,6 +269,7 @@ async function refreshGroupCache(instanceName?: string): Promise<void> {
     if (res.ok) {
       const groups = await res.json();
       if (Array.isArray(groups)) {
+        groupCacheEvictIfNeeded();
         groupCacheMap.set(name, { groups, timestamp: Date.now() });
         console.log(`[whatsapp] Group cache loaded for "${name}": ${groups.length} groups`);
       }
@@ -282,10 +293,13 @@ export async function findGroupByName(groupName: string, instanceName?: string, 
   if (cached && (Date.now() - cached.timestamp) < GROUP_CACHE_TTL) {
     groups = cached.groups;
   } else {
+    // Remove the stale entry so the map doesn't retain dead data
+    if (cached) groupCacheMap.delete(name);
     const res = await fetch(`${apiUrl}/group/fetchAllGroups/${name}?getParticipants=false`, { method: 'GET', headers: h });
     if (!res.ok) return null;
     groups = await res.json();
     if (Array.isArray(groups)) {
+      groupCacheEvictIfNeeded();
       groupCacheMap.set(name, { groups, timestamp: Date.now() });
     }
   }
