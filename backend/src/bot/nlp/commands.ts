@@ -21,6 +21,11 @@ export async function handleFinancialCommand(
 ): Promise<CommandResult> {
   const lower = text.toLowerCase().trim();
 
+  // Bot-authenticated GETs resolve the user from this identity (the API
+  // validates it against the active WhatsApp link) instead of falling back
+  // to a global "first active user" selection.
+  const userQS = userId ? `?userId=${encodeURIComponent(userId)}` : '';
+
   // --- SAUDACAO ---
   if (/^(oi+|ola|olá|bom dia|boa tarde|boa noite|e ai|e aí|opa|hello|hi|hey|oie|oiie|tudo bem|tudo bom)[!?.\s]*$/i.test(lower) ||
       /^(bom dia|boa tarde|boa noite|ola|olá|oi|opa|hey)\b.*\b(bot|contas|tudo bem|tudo bom)/i.test(lower)) {
@@ -39,9 +44,9 @@ export async function handleFinancialCommand(
       /^(como está|como tá|como vai).*(financeiro|contas|gastos)/i.test(lower)) {
     try {
       const [summary, byCategory, percentage] = await Promise.all([
-        callApi<any>('/api/bot/dashboard/summary', {}, 'GET'),
-        callApi<any[]>('/api/bot/dashboard/by-category', {}, 'GET'),
-        callApi<any>('/api/bot/dashboard/percentage', {}, 'GET'),
+        callApi<any>(`/api/bot/dashboard/summary${userQS}`, {}, 'GET'),
+        callApi<any[]>(`/api/bot/dashboard/by-category${userQS}`, {}, 'GET'),
+        callApi<any>(`/api/bot/dashboard/percentage${userQS}`, {}, 'GET'),
       ]);
 
       const balance = summary?.balance ?? 0;
@@ -83,7 +88,7 @@ export async function handleFinancialCommand(
   // --- GASTOS POR CATEGORIA ---
   if (/^gastos?\s*(\w+)?$/i.test(lower) || /^(quanto|oq|o que)\s+gastei\s+(em|com|de)\s+(\w+)/i.test(lower)) {
     try {
-      const byCategory = await callApi<any[]>('/api/bot/dashboard/by-category', {}, 'GET').catch(() => []);
+      const byCategory = await callApi<any[]>(`/api/bot/dashboard/by-category${userQS}`, {}, 'GET').catch(() => []);
       
       // Extract category filter
       const catFilter = lower.replace(/^(gastos?|quanto|oq|o que)\s+(gastei\s+)?(em|com|de)?\s*/i, '').trim();
@@ -119,7 +124,7 @@ export async function handleFinancialCommand(
   // --- CONTAS A VENCER ---
   if (/^(contas?\s*(a\s*)?vencer|proximas?\s*contas?|faturas?|boletos?)$/i.test(lower)) {
     try {
-      const bills = await callApi<any[]>('/api/bot/dashboard/upcoming-bills', {}, 'GET').catch(() => []);
+      const bills = await callApi<any[]>(`/api/bot/dashboard/upcoming-bills${userQS}`, {}, 'GET').catch(() => []);
       
       if (bills.length > 0) {
         let msg = `📅 *Contas a Vencer*\n\n`;
@@ -143,9 +148,9 @@ export async function handleFinancialCommand(
       /^(me\s+ajuda|me\s+de\s+uma\s+dica|sugest[aã]o|conselho)/i.test(lower)) {
     try {
       const [summary, byCategory, yearAnalysis] = await Promise.all([
-        callApi<any>('/api/bot/dashboard/summary', {}, 'GET').catch(() => null),
-        callApi<any[]>('/api/bot/dashboard/by-category', {}, 'GET').catch(() => []),
-        callApi<any>('/api/bot/dashboard/year-analysis', {}, 'GET').catch(() => null),
+        callApi<any>(`/api/bot/dashboard/summary${userQS}`, {}, 'GET').catch(() => null),
+        callApi<any[]>(`/api/bot/dashboard/by-category${userQS}`, {}, 'GET').catch(() => []),
+        callApi<any>(`/api/bot/dashboard/year-analysis${userQS}`, {}, 'GET').catch(() => null),
       ]);
 
       const categories = byCategory.slice(0, 5).map((c: any) =>
@@ -169,7 +174,7 @@ export async function handleFinancialCommand(
   // --- MES QUE MAIS GASTEI ---
   if (/^(mes\s+que\s+mais\s+gastei|pior\s+mes|maior\s+gasto|quando\s+gastei\s+mais)/i.test(lower)) {
     try {
-      const yearAnalysis = await callApi<any>('/api/bot/dashboard/year-analysis', {}, 'GET').catch(() => null);
+      const yearAnalysis = await callApi<any>(`/api/bot/dashboard/year-analysis${userQS}`, {}, 'GET').catch(() => null);
       
       if (yearAnalysis) {
         let msg = `📊 *Analise do Ano*\n\n`;
@@ -240,7 +245,7 @@ export async function handleFinancialCommand(
   if (/^(sa[úu]de|indicador|saude\s*financeira|sa[úu]de\s*financeira)$/i.test(lower) ||
       /^(como está|como ta|como vai)\s*(a\s*)?(sa[úu]de|nossas\s*finan)/i.test(lower)) {
     try {
-      const h = await callApi<any>('/api/bot/dashboard/financial-health', {}, 'GET').catch(() => null);
+      const h = await callApi<any>(`/api/bot/dashboard/financial-health${userQS}`, {}, 'GET').catch(() => null);
       if (!h) return { handled: true, message: 'Erro ao calcular a saúde financeira.' };
 
       const brl = (v: number) => `R$${v.toFixed(2).replace('.', ',')}`;

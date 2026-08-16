@@ -14,8 +14,24 @@ function getCurrentMonthRange(): { start: Date; end: Date } {
   return { start, end };
 }
 
-async function getBotUser() {
-  // Find first user with a linked WhatsApp phone
+async function getBotUser(req?: Request) {
+  // When the bot identifies the sender (WhatsApp instance -> user), resolve
+  // THAT user exclusively — never fall back to a global selection that could
+  // expose another account's data in a multi-user installation.
+  const requestedId = req?.query?.userId as string | undefined;
+  if (requestedId) {
+    const wa = await prisma.whatsAppUser.findFirst({
+      where: { userId: requestedId, isActive: true },
+    });
+    if (wa) {
+      const user = await prisma.user.findUnique({ where: { id: wa.userId } });
+      if (user) return user;
+    }
+    throw new Error("WhatsApp user not found or inactive");
+  }
+
+  // Legacy fallback (platforms without a linked user identity): first user
+  // with an active WhatsApp link.
   const wa = await prisma.whatsAppUser.findFirst({
     where: { isActive: true },
   });
@@ -32,7 +48,7 @@ async function getBotUser() {
 
 router.get("/summary", async (req: Request, res: Response) => {
   try {
-    const user = await getBotUser();
+    const user = await getBotUser(req);
     const { start, end } = getCurrentMonthRange();
 
     const [transactions, bills] = await Promise.all([
@@ -137,7 +153,7 @@ router.get("/summary", async (req: Request, res: Response) => {
 
 router.get("/by-category", async (req: Request, res: Response) => {
   try {
-    const user = await getBotUser();
+    const user = await getBotUser(req);
     const { start, end } = getCurrentMonthRange();
 
     const [transactions, bills] = await Promise.all([
@@ -191,7 +207,7 @@ router.get("/by-category", async (req: Request, res: Response) => {
 
 router.get("/percentage", async (req: Request, res: Response) => {
   try {
-    const user = await getBotUser();
+    const user = await getBotUser(req);
     const { start, end } = getCurrentMonthRange();
 
     const [transactions, bills] = await Promise.all([
@@ -270,7 +286,7 @@ router.get("/percentage", async (req: Request, res: Response) => {
 
 router.get("/last-7-days", async (req: Request, res: Response) => {
   try {
-    const user = await getBotUser();
+    const user = await getBotUser(req);
     const end = new Date();
     const start = new Date();
     start.setDate(start.getDate() - 7);
@@ -280,7 +296,9 @@ router.get("/last-7-days", async (req: Request, res: Response) => {
       where: {
         userId: user.id,
         date: { gte: start, lte: end },
-        billId: null,
+        // NOTE: this is an EXTRACT (list), not a sum — bill-linked card
+        // purchases stay visible here (a user with only card purchases
+        // would otherwise get an empty 7-day statement).
       },
       include: { category: true },
       orderBy: { date: 'desc' },
@@ -306,7 +324,7 @@ router.get("/last-7-days", async (req: Request, res: Response) => {
 // and installments/faturas ending within the next 3 months.
 router.get("/financial-health", async (req: Request, res: Response) => {
   try {
-    const user = await getBotUser();
+    const user = await getBotUser(req);
     const now = new Date();
     const { start, end } = getCurrentMonthRange(); // current month
     const nextStart = new Date(end); // 1st of next month
@@ -356,6 +374,7 @@ router.get("/financial-health", async (req: Request, res: Response) => {
           installmentGroupId: true,
           paymentMethod: true,
           isCreditCard: true,
+          billId: true,
           date: true,
         },
       }),
@@ -416,6 +435,7 @@ router.get("/financial-health", async (req: Request, res: Response) => {
           description: latest.description,
           paymentMethod: latest.paymentMethod,
           isCreditCard: latest.isCreditCard,
+          billId: latest.billId,
           currentInstallment: latest.currentInstallment,
           totalInstallments: latest.totalInstallments,
           monthlyAmount: latest.amount,
@@ -452,10 +472,12 @@ router.get("/financial-health", async (req: Request, res: Response) => {
     const leftover = monthlyIncome - commitments;
 
     // Next month forecast: known faturas + non-card parcels still running +
-    // card parcels due next month (they will form the next fatura; faturas
-    // of next month already cover card parcels when they exist).
+    // card parcels due next month that are NOT yet inside a fatura (open
+    // cycle — they will form the next fatura). Parcels already linked to a
+    // next-month fatura (billId set) are covered by faturasNextTotal — counting
+    // them here too would double-count the next-month commitment.
     const cardParcelsNext = openPurchases
-      .filter((p) => p.isCreditCard && p.remaining > 0)
+      .filter((p) => p.isCreditCard && p.remaining > 0 && !p.billId)
       .reduce((s, p) => s + p.monthlyAmount, 0);
     const nextForecast = faturasNextTotal + cardParcelsNext + nonCardNext;
 
@@ -500,7 +522,7 @@ router.get("/financial-health", async (req: Request, res: Response) => {
 
 router.get("/upcoming-bills", async (req: Request, res: Response) => {
   try {
-    const user = await getBotUser();
+    const user = await getBotUser(req);
     const now = new Date();
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
 

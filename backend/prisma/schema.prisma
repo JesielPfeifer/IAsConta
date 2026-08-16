@@ -140,6 +140,9 @@ model BankConnection {
   status       String?          // Pluggy item status (LOGIN_OK, LOGIN_ERROR, ...)
   lastSyncAt   DateTime?
   errorMessage String?
+  // Pluggy account ids belonging to this item — persisted at sync time so the
+  // DELETE cleanup only removes THIS connection's imported data.
+  accountIds   String[]  @default([])
   userId       String
   user         User      @relation(fields: [userId], references: [id])
   createdAt    DateTime  @default(now())

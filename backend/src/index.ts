@@ -94,14 +94,16 @@ app.post("/api/parse/caixa", upload.single("file"), async (req, res) => {
 
 app.post("/webhook/evolution", async (req, res) => {
   try {
-    // Validate webhook secret — fail if not configured
-    const webhookSecret = req.headers["x-webhook-secret"] as string;
-    const expectedSecret = process.env.WEBHOOK_SECRET;
+    // Validate webhook secret — fail if not configured. Dedicated secret so a
+    // leak in the Pluggy integration cannot forge Evolution webhooks; falls
+    // back to WEBHOOK_SECRET for deployments that haven't split them yet.
+    const expectedSecret = process.env.EVOLUTION_WEBHOOK_SECRET || process.env.WEBHOOK_SECRET;
     if (!expectedSecret) {
       console.error("[webhook] FATAL: WEBHOOK_SECRET not configured");
       res.status(500).json({ error: "Server misconfiguration" });
       return;
     }
+    const webhookSecret = req.headers["x-webhook-secret"] as string;
     if (webhookSecret !== expectedSecret) {
       console.warn("[webhook] Invalid webhook secret, rejecting");
       res.status(401).json({ error: "Unauthorized" });

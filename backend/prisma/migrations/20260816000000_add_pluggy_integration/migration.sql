@@ -37,6 +37,7 @@ CREATE TABLE "BankConnection" (
     "status" TEXT,
     "lastSyncAt" TIMESTAMP(3),
     "errorMessage" TEXT,
+    "accountIds" TEXT[] NOT NULL DEFAULT '{}',
     "userId" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 

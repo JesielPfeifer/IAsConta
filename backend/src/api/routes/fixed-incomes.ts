@@ -141,6 +141,16 @@ router.post("/apply", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Mês deve estar no formato YYYY-MM" });
       return;
     }
+    // Reject FUTURE months: the transaction date would fall back to
+    // Date.now() (current month) while externalId records the future month —
+    // the later apply for that month would skip an incorrectly dated row.
+    // Compare in local time (matches the frontend's "Lançar no mês").
+    const now = new Date();
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    if (month > currentMonth) {
+      res.status(400).json({ error: "Não é possível lançar renda em um mês futuro" });
+      return;
+    }
     const start = new Date(Date.UTC(y, m - 1, 1));
     const end = new Date(Date.UTC(y, m, 1));
 

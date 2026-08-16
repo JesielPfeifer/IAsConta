@@ -189,6 +189,16 @@ router.post("/items/attach", async (req: Request, res: Response) => {
       return;
     }
 
+    // Ownership: when the item carries a clientUserId (created via Connect
+    // Widget/API with our identity), it must match this user. Items WITHOUT
+    // clientUserId (created outside the widget, e.g. Meu Pluggy) are claimed
+    // here — the itemId itself is the claim proof, and getItem only succeeds
+    // with credentials that can see the item.
+    if (item.clientUserId && item.clientUserId !== user.id) {
+      res.status(403).json({ error: "Este item pertence a outro usuário" });
+      return;
+    }
+
     const connection = await prisma.bankConnection.create({
       data: {
         bankName: item.connector?.name || "Conexão Pluggy",
@@ -278,6 +288,12 @@ router.post("/items/:itemId/sync", async (req: Request, res: Response) => {
         res.status(404).json({
           error: `Item não encontrado na Pluggy: ${err instanceof PluggyError ? err.message : "erro desconhecido"}`,
         });
+        return;
+      }
+      // Ownership: a clientUserId set on the item (Connect Widget flow) must
+      // match this user — never import another user's item.
+      if (item.clientUserId && item.clientUserId !== user.id) {
+        res.status(403).json({ error: "Este item pertence a outro usuário" });
         return;
       }
       conn = await prisma.bankConnection.create({
@@ -376,28 +392,23 @@ router.delete("/items/:itemId", async (req: Request, res: Response) => {
       return;
     }
 
-    // Resolve the account IDs from LOCAL data (persisted by sync) BEFORE
-    // touching Pluggy: listing accounts of an already-deleted remote item
-    // fails, and the cleanup below would then match nothing, orphaning the
-    // imported transactions/bills (and re-importing them double-counts).
-    const [txAccounts, billAccounts] = await Promise.all([
-      prisma.transaction.findMany({
-        where: { userId: user.id, pluggyAccountId: { not: null } },
-        select: { pluggyAccountId: true },
-        distinct: ["pluggyAccountId"],
-      }),
-      prisma.bill.findMany({
-        where: { userId: user.id, pluggyAccountId: { not: null } },
-        select: { pluggyAccountId: true },
-        distinct: ["pluggyAccountId"],
-      }),
-    ]);
-    const accountIds = [
-      ...new Set([
-        ...txAccounts.map((a) => a.pluggyAccountId as string),
-        ...billAccounts.map((b) => b.pluggyAccountId as string),
-      ]),
-    ];
+    // Resolve the account IDs belonging to THIS item from the association
+    // persisted at sync time (bankConnection.accountIds). A userId-wide
+    // lookup would wipe every connection's data when one connection is
+    // removed. Fallback to a remote listing only when no sync ever ran
+    // (the item may still exist on Pluggy).
+    let accountIds = conn.accountIds || [];
+    if (accountIds.length === 0) {
+      const creds = await credsForUser(user.id);
+      if (creds) {
+        try {
+          const accounts = await createPluggyClient(creds).listAccounts(itemId);
+          accountIds = accounts.map((a) => a.id);
+        } catch {
+          accountIds = [];
+        }
+      }
+    }
 
     const creds = await credsForUser(user.id);
     if (creds) {
@@ -443,7 +454,10 @@ router.post("/webhooks/register", async (req: Request, res: Response) => {
       return;
     }
     const client = createPluggyClient(creds);
-    const secret = process.env.WEBHOOK_SECRET;
+    // Dedicated secret for the Pluggy integration (falls back to
+    // WEBHOOK_SECRET for deployments that haven't split them yet) — a leak
+    // here must not forge the Evolution webhook.
+    const secret = process.env.PLUGGY_WEBHOOK_SECRET || process.env.WEBHOOK_SECRET;
     const headers = secret ? { "x-webhook-secret": secret } : undefined;
 
     const results: Array<{ event: string; id?: string; error?: string }> = [];
@@ -467,7 +481,8 @@ router.post("/webhooks/register", async (req: Request, res: Response) => {
 // Webhook (public, validated via header X-Webhook-Secret)
 // ---------------------------------------------------------------
 router.post("/webhook", async (req: Request, res: Response) => {
-  const expected = process.env.WEBHOOK_SECRET;
+  const expected =
+    process.env.PLUGGY_WEBHOOK_SECRET || process.env.WEBHOOK_SECRET;
   // Fail fast when the secret is not configured: skipping the check would
   // accept unauthenticated webhook requests and let anyone trigger syncs.
   if (!expected) {

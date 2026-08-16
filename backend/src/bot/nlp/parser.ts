@@ -68,14 +68,19 @@ function formatConfirmation(parsed: ParsedTransaction): string {
     msg += `• Parcelado em *${parsed.installments.total}x* detectado! ✓\n`;
   }
 
-  // How to answer (clears up the follow-up flow)
+  // How to answer (clears up the follow-up flow). When installments were
+  // already detected there is only ONE question left (conta fixa) — telling
+  // the user to answer "nas duas" would confuse the follow-up state machine.
   msg += `\n💡 *Como responder:*\n`;
-  msg += `• Uma por vez: _sim_ ou _nao_\n`;
-  msg += `• As duas juntas: _sim e sim_ ou _sim, nao_\n`;
-  if (!parsed.installments || parsed.installments.total <= 1) {
+  if (parsed.installments && parsed.installments.total > 1) {
+    msg += `• Responda _sim_ ou _nao_\n`;
+    msg += `• Para cancelar: envie _nao_\n`;
+  } else {
+    msg += `• Uma por vez: _sim_ ou _nao_\n`;
+    msg += `• As duas juntas: _sim e sim_ ou _sim, nao_\n`;
     msg += `• Se foi parcelado, mande só o número de vezes: _3_, _6_, _10_...\n`;
+    msg += `• Para cancelar: envie _nao_ nas duas`;
   }
-  msg += `• Para cancelar: envie _nao_ nas duas`;
 
   return msg;
 }

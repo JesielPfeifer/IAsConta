@@ -309,6 +309,14 @@ export async function syncItem(itemId: string, userId: string): Promise<SyncResu
   const accounts = await client.listAccounts(itemId);
   result.accounts = accounts.length;
 
+  // Persist the item->account association: the DELETE cleanup uses it to
+  // remove ONLY the rows of this item (a userId-wide lookup would wipe
+  // every connection's data when one connection is removed).
+  await prisma.bankConnection.update({
+    where: { id: connection.id },
+    data: { accountIds: accounts.map((a) => a.id) },
+  });
+
   // Bank of the item: from the first BANK account with a recognizable name
   // (e.g. "Nu Pagamentos S.A." → NUBANK). Used as fallback for credit cards
   // whose account.name is generic ("platinum", "gold"...).

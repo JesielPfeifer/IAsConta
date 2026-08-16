@@ -304,6 +304,10 @@ export interface PluggyItem {
   error?: { code?: string; message?: string } | null;
   products?: string[];
   executionStatus?: string | null;
+  /** External reference to the end-user that owns this item (set when the
+   *  item was created via connect token or createItem with clientUserId).
+   *  Pluggy does NOT enforce this — WE must validate it before claiming. */
+  clientUserId?: string | null;
 }
 
 export interface CreateItemParams {
