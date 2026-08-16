@@ -333,6 +333,8 @@ export interface PluggyCreditCardMetadata {
   payeeMCC?: number | null;
   cardNumber?: string | null;
   feeType?: string | null;
+  feeTypeAdditionalInfo?: string | null;
+  billForecastDate?: string | null;
 }
 
 export interface PluggyTransaction {

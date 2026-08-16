@@ -104,6 +104,22 @@ function isCreditCardBillPayment(description: string): boolean {
     /pagamento\s+(de\s+)?fatura/.test(d);
 }
 
+/**
+ * Credit card "previous invoice balance" marker row (feeTypeAdditionalInfo
+ * "SALDO INICIAL", description like "TOTAL DA FATURA ANTERIOR"). Not a
+ * purchase — importing it would inflate the month totals.
+ */
+function isInvoiceBalanceMarker(tx: PluggyTransaction): boolean {
+  const meta = tx.creditCardMetadata || {};
+  if (typeof meta.feeTypeAdditionalInfo === "string" &&
+      meta.feeTypeAdditionalInfo.toUpperCase().includes("SALDO INICIAL")) {
+    return true;
+  }
+  const d = (tx.description || "").normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  return d.includes("total da fatura");
+}
+
 function getOrCreateCategoryName(
   pluggyCategory: string | null | undefined,
   description: string
@@ -221,8 +237,8 @@ async function syncBankAccount(
   const paymentMethod = normalizePaymentMethod(account, connectorName);
 
   for (const tx of transactions) {
-    // Skip PENDING transactions: not confirmed at the institution yet
-    if (tx.status === "PENDING") continue;
+    // PENDING purchases (open credit-card cycle / unconfirmed debit) are
+    // imported too — dedupe by externalId prevents duplicates once POSTED.
 
     // Skip credit card bill payments: the fatura is already represented as a
     // Bill row (source PLUGGY) and counts the expense once. Importing the
@@ -298,7 +314,9 @@ async function syncCreditCard(
   const paymentMethod = normalizePaymentMethod(account, connectorName);
 
   for (const tx of transactions) {
-    if (tx.status === "PENDING") continue;
+    // PENDING purchases are imported too (dedupe by externalId prevents
+    // duplicates once POSTED); only the invoice-balance marker is skipped.
+    if (isInvoiceBalanceMarker(tx)) continue;
 
     const existing = await prisma.transaction.findUnique({
       where: { userId_externalId: { userId, externalId: tx.id } },
