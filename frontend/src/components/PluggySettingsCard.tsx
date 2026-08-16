@@ -145,7 +145,7 @@ export default function PluggySettingsCard() {
         });
       }
 
-      const handler = new window.PluggyConnect({
+      const handler = new PluggyConnect({
         connectToken: accessToken,
         onSuccess: async ({ itemId }: { itemId: string }) => {
           setSyncMessage('Conta conectada! Sincronizando dados...');
@@ -169,7 +169,7 @@ export default function PluggySettingsCard() {
           setSyncMessage(`Erro na conexão: ${err?.message || 'desconhecido'}`);
         },
       });
-      handler.open();
+      handler.init();
       // Widget is open; keep connecting state until closed
     } catch (err: any) {
       setConnecting(false);
