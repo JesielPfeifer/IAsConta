@@ -97,7 +97,10 @@ services:
             LOG_LEVEL: ERROR,WARN,INFO
             LOG_BAILEYS: error
             WA_BUSINESS_TOKEN_WEBHOOK: secret_api_key
-            WEBHOOK_GLOBAL_ENABLED: "true"
+            # Global webhook DISABLED: Evolution v2.3.7 sends it WITHOUT custom
+            # headers → API rejeita (401) e gera ruído. Eventos devem vir sempre
+            # por webhook POR-INSTÂNCIA (configurado pelo app na criação).
+            WEBHOOK_GLOBAL_ENABLED: "false"
             WEBHOOK_GLOBAL_URL: http://api:3001/webhook/evolution
             WEBHOOK_GLOBAL_EVENTS: "MESSAGES_UPSERT"
             WEBHOOK_GLOBAL_HEADERS: '{"x-webhook-secret":"${EVOLUTION_WEBHOOK_SECRET}"}'

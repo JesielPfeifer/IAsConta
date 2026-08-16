@@ -125,7 +125,7 @@ app.post("/webhook/evolution", async (req, res) => {
     }
     const webhookSecret = req.headers["x-webhook-secret"] as string;
     if (webhookSecret !== expectedSecret) {
-      console.warn("[webhook] Invalid webhook secret, rejecting");
+      console.warn(`[webhook] Invalid webhook secret, rejecting. received=${JSON.stringify(webhookSecret)}`);
       res.status(401).json({ error: "Unauthorized" });
       return;
     }

@@ -44,6 +44,42 @@ async function headers(userId?: string): Promise<Record<string, string>> {
   };
 }
 
+/**
+ * Configure the per-instance webhook with the dedicated secret.
+ * REQUIRED: Evolution API v2.3.7's GLOBAL webhook never sends custom headers,
+ * so any event routed globally is rejected by the API (401) and the bot goes
+ * silent. Per-instance webhooks DO carry the x-webhook-secret header.
+ */
+async function configureInstanceWebhook(instanceName: string, userId?: string): Promise<void> {
+  try {
+    const webhookSecret = process.env.EVOLUTION_WEBHOOK_SECRET;
+    if (!webhookSecret) {
+      console.error('[whatsapp] EVOLUTION_WEBHOOK_SECRET not set — skipping per-instance webhook config');
+      return;
+    }
+    const apiUrl = await getEvoApiUrl(userId);
+    const res = await fetch(`${apiUrl}/webhook/set/${instanceName}`, {
+      method: 'POST',
+      headers: await headers(userId),
+      body: JSON.stringify({
+        webhook: {
+          enabled: true,
+          url: 'http://api:3001/webhook/evolution',
+          events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE'],
+          headers: { 'x-webhook-secret': webhookSecret },
+        },
+      }),
+    });
+    if (!res.ok) {
+      console.error(`[whatsapp] Failed to configure webhook for "${instanceName}": ${res.status} ${await res.text()}`);
+    } else {
+      console.log(`[whatsapp] Webhook configured for "${instanceName}"`);
+    }
+  } catch (err) {
+    console.error(`[whatsapp] Webhook config error for "${instanceName}":`, err);
+  }
+}
+
 export async function startWhatsApp(): Promise<void> {
   const botUserId = await getBotUserId();
   const apiUrl = await getEvoApiUrl(botUserId);
@@ -94,6 +130,8 @@ export async function ensureInstanceForUser(instanceName: string, userId: string
 
     if (createRes.ok) {
       console.log(`[whatsapp] Instance "${instanceName}" created for user ${userId}`);
+      // Configure per-instance webhook (global webhook can't send the secret header in v2.3.7)
+      await configureInstanceWebhook(instanceName, userId);
       return instanceName;
     } else {
       const err = await createRes.text();
@@ -202,6 +240,7 @@ async function ensureDefaultInstance(userId?: string): Promise<void> {
 
     if (createRes.ok) {
       console.log(`[whatsapp] Default instance "${DEFAULT_INSTANCE}" created`);
+      await configureInstanceWebhook(DEFAULT_INSTANCE, userId);
     } else {
       const err = await createRes.text();
       console.error(`[whatsapp] Failed to create default instance: ${err}`);
