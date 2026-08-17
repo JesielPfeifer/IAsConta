@@ -356,7 +356,7 @@ export default function PluggySettingsCard() {
                   value={attachItemId}
                   onChange={(e) => setAttachItemId(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleAttach()}
-                  placeholder="itemId (ex: 1498c237-c9b7-4527-a93d-270a769eb8e0)"
+                  placeholder="itemId (ex: 00000000-0000-0000-0000-000000000000)"
                   className="flex-1 min-w-[220px] bg-white/[0.03] border border-white/10 rounded-xl px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/30"
                 />
                 <button
