@@ -9,7 +9,7 @@ services:
         volumes:
             - pgdata:/var/lib/postgresql/data
         ports:
-            - "5555:5432"
+            - "127.0.0.1:5555:5432"
         healthcheck:
             test: ["CMD-SHELL", "pg_isready -U postgres"]
             interval: 5s
@@ -22,7 +22,7 @@ services:
         image: redis:7-alpine
         restart: unless-stopped
         ports:
-            - "6380:6379"
+            - "127.0.0.1:6380:6379"
         volumes:
             - redis_data:/data
         networks:
@@ -40,9 +40,15 @@ services:
             DATABASE_URL: postgresql://postgres:prisma@postgres:5432/contas?schema=public
             API_URL: http://api:3001
             EVOLUTION_API_URL: http://evolution-api:8080
-            # BOT_DEFAULT_EMAIL: defina no backend/.env
+            JWT_SECRET: ${JWT_SECRET}
+            BOT_API_KEY: ${BOT_API_KEY}
+            # Secrets de webhook DEDICADOS e OBRIGATÓRIOS (sem fallback): sem
+            # eles o servidor NÃO inicia (falha no startup, ver index.ts).
+            EVOLUTION_WEBHOOK_SECRET: ${EVOLUTION_WEBHOOK_SECRET}
+            PLUGGY_WEBHOOK_SECRET: ${PLUGGY_WEBHOOK_SECRET}
+            CORS_ORIGINS: ${CORS_ORIGINS}
         ports:
-            - "3001:3001"
+            - "127.0.0.1:3001:3001"
         depends_on:
             postgres:
                 condition: service_healthy
@@ -61,7 +67,7 @@ services:
             dockerfile: Dockerfile
         restart: unless-stopped
         ports:
-            - "3002:3000"
+            - "127.0.0.1:3002:3000"
         depends_on:
             - api
         networks:
@@ -80,7 +86,7 @@ services:
         container_name: contas-evolution-api
         restart: unless-stopped
         ports:
-            - "8082:8080"
+            - "127.0.0.1:8082:8080"
         environment:
             SERVER_URL: http://localhost:8080
             DATABASE_PROVIDER: postgresql
@@ -91,9 +97,13 @@ services:
             LOG_LEVEL: ERROR,WARN,INFO
             LOG_BAILEYS: error
             WA_BUSINESS_TOKEN_WEBHOOK: secret_api_key
-            WEBHOOK_GLOBAL_ENABLED: "true"
+            # Global webhook DISABLED: Evolution v2.3.7 sends it WITHOUT custom
+            # headers → API rejeita (401) e gera ruído. Eventos devem vir sempre
+            # por webhook POR-INSTÂNCIA (configurado pelo app na criação).
+            WEBHOOK_GLOBAL_ENABLED: "false"
             WEBHOOK_GLOBAL_URL: http://api:3001/webhook/evolution
             WEBHOOK_GLOBAL_EVENTS: "MESSAGES_UPSERT"
+            WEBHOOK_GLOBAL_HEADERS: '{"x-webhook-secret":"${EVOLUTION_WEBHOOK_SECRET}"}'
         depends_on:
             postgres:
                 condition: service_healthy

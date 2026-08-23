@@ -15,7 +15,8 @@ declare global {
   }
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || "change-me-to-a-random-secret";
+const JWT_SECRET = process.env.JWT_SECRET as string;
+if (!JWT_SECRET) throw new Error("JWT_SECRET env var is required");
 
 export function authMiddleware(
   req: Request,

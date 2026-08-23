@@ -85,7 +85,7 @@ export default function TransactionForm({ transaction, onSave, onClose }: Props)
 
   useEffect(() => {
     api('/api/categories').then((data) => setCategories(Array.isArray(data) ? data : [])).catch(() => {});
-    api('/api/payment-methods').then((data) => setPaymentMethods(Array.isArray(data) ? data : [])).catch(() => {});
+    api('/api/payment-methods?active=true').then((data) => setPaymentMethods(Array.isArray(data) ? data : [])).catch(() => {});
   }, []);
 
   function updateField<K extends keyof TransactionFormData>(key: K, value: TransactionFormData[K]) {
@@ -105,7 +105,7 @@ export default function TransactionForm({ transaction, onSave, onClose }: Props)
     e.preventDefault();
     setError('');
     if (!form.amount || form.amount <= 0) { setError('Valor deve ser maior que zero'); return; }
-    if (!form.description.trim()) { setError('Descricao e obrigatória'); return; }
+    if (!form.description.trim()) { setError('Descrição é obrigatória'); return; }
 
     setLoading(true);
     try {
@@ -220,10 +220,10 @@ export default function TransactionForm({ transaction, onSave, onClose }: Props)
               <select value={form.categoryId} onChange={(e) => updateField('categoryId', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50">
                 <option value="">Selecione...</option>
                 {categories
-                  .filter(c => /salário|salário|freelance|investimento|renda|extra/i.test(c.name))
+                  .filter(c => /salário|salario|freelance|investimento|renda|extra/i.test(c.name))
                   .map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
                 {categories
-                  .filter(c => !/salário|salário|freelance|investimento|renda|extra/i.test(c.name))
+                  .filter(c => !/salário|salario|freelance|investimento|renda|extra/i.test(c.name))
                   .map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
               </select>
             </div>
