@@ -22,41 +22,26 @@ interface Bill {
   categoryId?: string;
 }
 
-interface CreditCardTx {
-  id: string;
-  description: string;
-  amount: number;
-  date: string;
-  categoryName?: string;
-  paymentMethod: string;
-  totalInstallments: number;
-  currentInstallment: number;
-  installmentAmount?: number;
-}
-
 export default function Dashboard() {
   const [month, setMonth] = useState(dayjs().format('YYYY-MM'));
   const { summary, byCategory, byPayment, creditCardTotal, comparison, yearAnalysis, tip, loading } = useDashboard(month);
   const { transactions } = useTransactions({ month });
   
   const [bills, setBills] = useState<Bill[]>([]);
-  const [creditCardTx, setCreditCardTx] = useState<CreditCardTx[]>([]);
   const [incomeTx, setIncomeTx] = useState<any[]>([]);
   const [loadingExtras, setLoadingExtras] = useState(true);
 
   useEffect(() => {
     const loadExtras = async () => {
       try {
-        const [billsData, ccData, incomeData] = await Promise.all([
+        const [billsData, incomeData] = await Promise.all([
           api('/api/bills').catch(() => []),
-          api(`/api/dashboard/credit-card-detail?month=${encodeURIComponent(month)}`).catch(() => []),
           api(`/api/dashboard/income-detail?month=${encodeURIComponent(month)}`).catch(() => []),
         ]);
-        const mappedBills = Array.isArray(billsData) 
+        const mappedBills = Array.isArray(billsData)
           ? billsData.map((b: any) => ({ ...b, categoryName: b.category?.name || '-' }))
           : [];
         setBills(mappedBills);
-        setCreditCardTx(Array.isArray(ccData) ? ccData : []);
         setIncomeTx(Array.isArray(incomeData) ? incomeData : []);
       } catch {
         // silent
@@ -66,7 +51,6 @@ export default function Dashboard() {
     };
     loadExtras();
   }, [month]);
-
   const now = dayjs(month + '-01');
   const monthStart = now.startOf('month');
   const monthEnd = now.endOf('month');
@@ -110,7 +94,7 @@ export default function Dashboard() {
           <div className="flex flex-col gap-1">
             <p className="text-sm font-medium text-emerald-400/80">Visao geral</p>
             <h1 className="text-3xl font-bold tracking-tight text-white">Dashboard</h1>
-            <p className="text-sm text-gray-400">Acompanhe suas financas em tempo real</p>
+            <p className="text-sm text-gray-400">Acompanhe suas finanças em tempo real</p>
           </div>
           <div className="flex items-center gap-2">
             <Calendar className="h-5 w-5 text-emerald-400" />
@@ -127,7 +111,7 @@ export default function Dashboard() {
       {/* Cards resumo */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         <SummaryCard
-          label="Saldo do mes"
+          label="Saldo do mês"
           value={formatCurrency(balance)}
           icon={<Wallet className="h-5 w-5 text-emerald-400" />}
           color={balance >= 0 ? 'text-emerald-400' : 'text-red-400'}
@@ -156,23 +140,23 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Comparacao mes anterior */}
+      {/* Comparacao mês anterior */}
       {comparison && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <MiniCard
-            label="vs mes anterior"
+            label="vs mês anterior"
             value={`${comparison.diffPercent > 0 ? '+' : ''}${comparison.diffPercent}%`}
             icon={comparison.diffExpense <= 0 ? <TrendingDown className="h-5 w-5 text-emerald-400" /> : <TrendingUp className="h-5 w-5 text-red-400" />}
             color={comparison.diffExpense <= 0 ? 'text-emerald-400' : 'text-red-400'}
             sub="variacao nas despesas"
           />
           <MiniCard
-            label="Despesas mes anterior"
+            label="Despesas mês anterior"
             value={formatCurrency(comparison.previous.expense)}
             color="text-white"
           />
           <MiniCard
-            label="Receitas mes anterior"
+            label="Receitas mês anterior"
             value={formatCurrency(comparison.previous.income)}
             color="text-white"
           />
@@ -227,14 +211,14 @@ export default function Dashboard() {
               </tfoot>
             </table>
           ) : (
-            <EmptyState icon={<CheckSquare className="h-8 w-8 text-gray-700" />} text="Nenhuma conta fixa no mes" />
+            <EmptyState icon={<CheckSquare className="h-8 w-8 text-gray-700" />} text="Nenhuma conta fixa no mês" />
           )}
         </SectionCard>
 
-        {/* Gastos do Mes (variaveis) */}
+        {/* Gastos do Mes (variáveis) */}
         <SectionCard
           title="Gastos do Mes"
-          subtitle="Despesas variaveis"
+          subtitle="Despesas variáveis"
           icon={<Receipt className="h-5 w-5 text-orange-400" />}
           iconBg="bg-orange-500/10"
         >
@@ -243,7 +227,7 @@ export default function Dashboard() {
               <thead>
                 <tr className="text-left text-xs uppercase tracking-wider text-gray-500 border-b border-white/5">
                   <th className="pb-3 font-medium">Data</th>
-                  <th className="pb-3 font-medium">Descricao</th>
+                  <th className="pb-3 font-medium">Descrição</th>
                   <th className="pb-3 font-medium">Categoria</th>
                   <th className="pb-3 text-right font-medium">Valor</th>
                 </tr>
@@ -270,7 +254,7 @@ export default function Dashboard() {
               </tfoot>
             </table>
           ) : (
-            <EmptyState icon={<Receipt className="h-8 w-8 text-gray-700" />} text="Nenhum gasto variavel" />
+            <EmptyState icon={<Receipt className="h-8 w-8 text-gray-700" />} text="Nenhum gasto variável" />
           )}
         </SectionCard>
       </div>
@@ -334,7 +318,7 @@ export default function Dashboard() {
               </div>
             </div>
           ) : (
-            <EmptyState icon={<PieChart className="h-8 w-8 text-gray-700" />} text="Nenhum dado disponivel" />
+            <EmptyState icon={<PieChart className="h-8 w-8 text-gray-700" />} text="Nenhum dado disponível" />
           )}
         </SectionCard>
 
@@ -350,7 +334,7 @@ export default function Dashboard() {
               <thead>
                 <tr className="text-left text-xs uppercase tracking-wider text-gray-500 border-b border-white/5">
                   <th className="pb-3 font-medium">Data</th>
-                  <th className="pb-3 font-medium">Descricao</th>
+                  <th className="pb-3 font-medium">Descrição</th>
                   <th className="pb-3 font-medium">Pessoa</th>
                   <th className="pb-3 text-right font-medium">Valor</th>
                 </tr>
@@ -379,55 +363,10 @@ export default function Dashboard() {
               </tfoot>
             </table>
           ) : (
-            <EmptyState icon={<DollarSign className="h-8 w-8 text-gray-700" />} text="Nenhuma receita no mes" />
+            <EmptyState icon={<DollarSign className="h-8 w-8 text-gray-700" />} text="Nenhuma receita no mês" />
           )}
         </SectionCard>
       </div>
-
-      {/* Cartao de Credito */}
-      {creditCardTx.length > 0 && (
-        <SectionCard
-          title="Cartao de Credito"
-          subtitle={`Total: ${formatCurrency(creditCardTotal)} | ${creditCardTx.length} compras no cartao`}
-          icon={<CreditCard className="h-5 w-5 text-amber-400" />}
-          iconBg="bg-amber-500/10"
-        >
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs uppercase tracking-wider text-gray-500 border-b border-white/5">
-                  <th className="pb-3 font-medium">Descricao</th>
-                  <th className="pb-3 font-medium">Categoria</th>
-                  <th className="pb-3 font-medium">Cartao</th>
-                  <th className="pb-3 font-medium">Parcelas</th>
-                  <th className="pb-3 font-medium">Valor Parcela</th>
-                  <th className="pb-3 text-right font-medium">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {creditCardTx.map((tx) => (
-                  <tr key={tx.id} className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors">
-                    <td className="py-3 font-medium text-white max-w-[160px] truncate">{tx.description}</td>
-                    <td className="py-3 text-gray-400 text-xs">{tx.categoryName || '-'}</td>
-                    <td className="py-3">
-                      <span className="px-2 py-0.5 text-xs rounded-full bg-amber-500/10 text-amber-400">
-                        {tx.paymentMethod}
-                      </span>
-                    </td>
-                    <td className="py-3 text-gray-400">{tx.currentInstallment}/{tx.totalInstallments}</td>
-                    <td className="py-3 text-gray-300 tabular-nums">
-                      {formatCurrency(tx.installmentAmount ?? tx.amount)}
-                    </td>
-                    <td className="py-3 text-right font-semibold tabular-nums text-amber-400">
-                      {formatCurrency(tx.amount)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </SectionCard>
-      )}
 
       {/* Gastos por Meio de Pagamento */}
       <SectionCard
