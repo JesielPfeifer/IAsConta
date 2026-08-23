@@ -93,7 +93,7 @@ function getMonthRange(month?: string): { start: Date; end: Date } {
  * stable classifier — a payment-method rename or deletion cannot hide
  * historical card transactions (the name list only covers legacy rows).
  */
-async function cardTransactionWhere(userId: string, start: Date, end: Date, month?: string) {
+async function cardTransactionWhere(userId: string, start: Date, end: Date) {
   const cardMethods = await prisma.paymentMethod.findMany({
     where: { userId, type: "CARD" },
     select: { name: true },
@@ -113,11 +113,11 @@ async function cardTransactionWhere(userId: string, start: Date, end: Date, mont
     "doc enviado",
     "doc recebido",
   ].map((s) => ({ NOT: { description: { contains: s, mode: "insensitive" as const } } }));
-  // Group by the invoice month Pluggy reports (billForecastMonth) when present;
-  // fall back to the mês-civil date window for legacy rows that predate it.
-  const invoiceFilter = month
-    ? { OR: [{ billForecastMonth: month }, { billForecastMonth: null, date: { gte: start, lt: end } }] }
-    : { date: { gte: start, lt: end } };
+  // Filtra pela DATA DA COMPRA (mês civil), igual à lista de transações.
+  // O billForecastMonth (mês da fatura informado pelo Pluggy) NÃO é usado
+  // como critério de filtro, para que uma compra de 18/08 apareça em Agosto
+  // e não "pule" para Setembro só porque a fatura do banco é do mês seguinte.
+  const invoiceFilter = { date: { gte: start, lt: end } };
   return {
     userId,
     type: "EXPENSE" as const,
@@ -423,7 +423,7 @@ router.get("/credit-card-total", async (req: Request, res: Response) => {
     const { start, end } = getMonthRange(req.query.month as string);
 
     const transactions = await prisma.transaction.findMany({
-      where: await cardTransactionWhere(user.id, start, end, req.query.month as string),
+      where: await cardTransactionWhere(user.id, start, end),
     });
 
     let total = 0;
@@ -612,7 +612,7 @@ router.get("/credit-card-detail", async (req: Request, res: Response) => {
     const { start, end } = getMonthRange(req.query.month as string);
 
     const transactions = await prisma.transaction.findMany({
-      where: await cardTransactionWhere(user.id, start, end, req.query.month as string),
+      where: await cardTransactionWhere(user.id, start, end),
       include: { category: true },
       orderBy: { date: "desc" },
     });
