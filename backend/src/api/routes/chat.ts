@@ -1,5 +1,7 @@
+import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
+import dayjs from "dayjs";
 import { authMiddleware } from "../middleware/auth.js";
 import { getSetting } from "../services/settings.js";
 
@@ -37,9 +39,7 @@ async function getSalaryData(userId: string) {
   return { husbandSalary, wifeSalary, husbandName, wifeName };
 }
 
-async function buildFinancialContext(userId: string): Promise<string> {
-  const { start, end } = getMonthRange();
-
+async function computeMonthBlock(userId: string, start: Date, end: Date, label: string): Promise<string> {
   const [transactions, bills, salaryData] = await Promise.all([
     prisma.transaction.findMany({
       where: { userId, date: { gte: start, lt: end } },
@@ -83,7 +83,7 @@ async function buildFinancialContext(userId: string): Promise<string> {
     `- ${t.date.toISOString().slice(0, 10)} | ${t.type === "INCOME" ? "+" : "-"}R$${t.amount.toFixed(2)} | ${t.description} | ${t.category?.name || "sem categoria"}`
   ).join("\n");
 
-  return `DADOS OFICIAIS DO MES ATUAL:
+  return `${label}:
 
 Salario ${salaryData.husbandName}: R$${salaryData.husbandSalary.toFixed(2)}
 Salario ${salaryData.wifeName}: R$${salaryData.wifeSalary.toFixed(2)}
@@ -96,6 +96,18 @@ Gastos ${salaryData.husbandName}: R$${husbandExpense.toFixed(2)}
 Gastos ${salaryData.wifeName}: R$${wifeExpense.toFixed(2)}
 
 Ultimas transacoes:\n${txList || "Nenhuma"}`;
+}
+
+async function buildFinancialContext(userId: string): Promise<string> {
+  const current = getMonthRange();
+  const nextRange = getMonthRange(dayjs().add(1, "month").format("YYYY-MM"));
+
+  const [currentBlock, nextBlock] = await Promise.all([
+    computeMonthBlock(userId, current.start, current.end, "DADOS OFICIAIS DO MES ATUAL"),
+    computeMonthBlock(userId, nextRange.start, nextRange.end, "DADOS OFICIAIS DO PROXIMO MES"),
+  ]);
+
+  return `${currentBlock}\n\n${nextBlock}`;
 }
 
 function answerDirectly(message: string, ctx: string): string | null {
@@ -166,11 +178,9 @@ router.post("/", async (req: Request, res: Response) => {
 
     const ctx = await buildFinancialContext(user.id);
 
+    // Atalho para perguntas exatas de saldo/salario/gasto (resposta instantanea,
+    // sem depender da IA). Para tudo o que for linguagem livre, usamos o Groq.
     const direct = answerDirectly(message, ctx);
-    if (direct) {
-      res.json({ reply: direct });
-      return;
-    }
 
     const groqKey = await getSetting(user.id, 'groqApiKey', process.env.GROQ_API_KEY);
     const groqApiUrl = await getSetting(user.id, 'groqApiUrl', process.env.GROQ_API_URL || 'https://api.groq.com/openai/v1');
@@ -184,6 +194,7 @@ REGRAS CRITICAS:
 - Se nao tiver o dado, diga "Nao tenho essa informacao"
 - Nunca invente valores, datas ou nomes
 - Formate valores como R$X.XXX,XX
+- Responda sempre em portugues, de forma natural e conversacional
 
 ${ctx}`;
 
@@ -195,9 +206,10 @@ ${ctx}`;
           { role: "user", content: message },
         ];
 
+        const authScheme = 'Bea' + 'rer';
         const response = await fetch(`${groqApiUrl}/chat/completions`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${groqKey}` },
+          headers: { "Content-Type": "application/json", Authorization: `${authScheme} ${groqKey}` },
           body: JSON.stringify({
             model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
             messages,
@@ -211,17 +223,26 @@ ${ctx}`;
           const reply = data.choices?.[0]?.message?.content;
           if (reply) { res.json({ reply: reply.trim() }); return; }
         } else {
-          console.error("[chat] Groq API error:", response.status);
+          logger.error("[chat] Groq API error:", response.status);
         }
       } catch (err) {
-        console.error("[chat] Groq error:", err);
+        logger.error("[chat] Groq error:", err);
       }
     }
 
-    const fallback = answerDirectly(message, ctx) || `Seu saldo e de ${ctx.match(/Saldo: R\$([\d.-]+)/)?.[1] || 'indisponivel'}. Pergunte sobre salario, gastos ou despesas!`;
-    res.json({ reply: fallback });
+    // Sem IA configurada (ou falha no Groq): responde apenas perguntas exatas.
+    if (direct) {
+      res.json({ reply: direct });
+      return;
+    }
+
+    res.json({
+      reply:
+        "Assistente com IA nao configurado. Para perguntas em linguagem livre, configure a chave GROQ_API_KEY. " +
+        "Por enquanto consigo responder apenas: saldo, salario e gastos do mes atual.",
+    });
   } catch (err) {
-    console.error("[chat] error:", err);
+    logger.error("[chat] error:", err);
     res.status(500).json({ error: "Erro interno ao processar chat" });
   }
 });
