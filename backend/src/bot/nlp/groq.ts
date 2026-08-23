@@ -1,4 +1,3 @@
-import { logger } from '../../lib/logger.js';
 import Groq from 'groq-sdk';
 import { PrismaClient } from '@prisma/client';
 
@@ -108,7 +107,7 @@ export async function parseWithGroq(text: string, userId?: string): Promise<Pars
   }
 
   if (!apiKey) {
-    logger.warn('[nlp] GROQ_API_KEY not set, skipping Groq parse');
+    console.warn('[nlp] GROQ_API_KEY not set, skipping Groq parse');
     return null;
   }
 
@@ -127,18 +126,18 @@ export async function parseWithGroq(text: string, userId?: string): Promise<Pars
 
     const responseText = result.choices[0]?.message?.content?.trim() || '';
 
-    logger.info('[nlp] Groq response:', responseText);
+    console.log('[nlp] Groq response:', responseText);
 
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      logger.warn('[nlp] Groq did not return valid JSON:', responseText);
+      console.warn('[nlp] Groq did not return valid JSON:', responseText);
       return null;
     }
 
     const parsed = JSON.parse(jsonMatch[0]);
     return normalizeParsed(parsed);
   } catch (err) {
-    logger.error('[nlp] Groq parse error:', err);
+    console.error('[nlp] Groq parse error:', err);
     return null;
   }
 }

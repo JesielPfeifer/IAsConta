@@ -1,4 +1,3 @@
-import { logger } from '../../lib/logger.js';
 import { Client, GatewayIntentBits } from 'discord.js';
 import { processMessage } from '../nlp/parser.js';
 
@@ -10,7 +9,7 @@ const COMMANDS = ['!gastei', '!recebi', '!conta', '!saldo', '!resumo'];
 
 export async function startDiscord(): Promise<void> {
   if (!TOKEN) {
-    logger.info('[discord] DISCORD_TOKEN not set, skipping');
+    console.log('[discord] DISCORD_TOKEN not set, skipping');
     return;
   }
 
@@ -23,7 +22,7 @@ export async function startDiscord(): Promise<void> {
   });
 
   client.on('ready', () => {
-    logger.info(`[discord] Logged in as ${client?.user?.tag}`);
+    console.log(`[discord] Logged in as ${client?.user?.tag}`);
   });
 
   client.on('messageCreate', async (message) => {

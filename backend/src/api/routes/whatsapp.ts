@@ -1,4 +1,3 @@
-import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import { authMiddleware } from "../middleware/auth.js";
 import { getQRCode, getConnectionState, disconnectInstance, findGroupByName } from "../../bot/platforms/whatsapp.js";
@@ -14,7 +13,7 @@ router.get("/qrcode", async (req: Request, res: Response) => {
     const result = await getQRCode(instanceName);
     res.json(result);
   } catch (err) {
-    logger.error("[whatsapp] qrcode error:", err);
+    console.error("[whatsapp] qrcode error:", err);
     res.status(500).json({ error: "Erro ao gerar QR Code" });
   }
 });
@@ -26,7 +25,7 @@ router.get("/status", async (req: Request, res: Response) => {
     const state = await getConnectionState(instanceName);
     res.json({ connected: state === "open", state });
   } catch (err) {
-    logger.error("[whatsapp] status error:", err);
+    console.error("[whatsapp] status error:", err);
     res.status(500).json({ connected: false, state: "error" });
   }
 });
@@ -38,7 +37,7 @@ router.post("/disconnect", async (req: Request, res: Response) => {
     const ok = await disconnectInstance(instanceName);
     res.json({ success: ok });
   } catch (err) {
-    logger.error("[whatsapp] disconnect error:", err);
+    console.error("[whatsapp] disconnect error:", err);
     res.status(500).json({ success: false, error: "Erro ao desconectar" });
   }
 });

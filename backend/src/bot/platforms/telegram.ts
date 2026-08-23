@@ -1,4 +1,3 @@
-import { logger } from '../../lib/logger.js';
 import { Bot } from 'grammy';
 import { processMessage } from '../nlp/parser.js';
 
@@ -10,7 +9,7 @@ let bot: Bot | null = null;
 
 export async function startTelegram(): Promise<void> {
   if (!TOKEN) {
-    logger.info('[telegram] TELEGRAM_TOKEN not set, skipping');
+    console.log('[telegram] TELEGRAM_TOKEN not set, skipping');
     return;
   }
 
@@ -38,7 +37,7 @@ export async function startTelegram(): Promise<void> {
 
   bot.start({
     onStart: () => {
-      logger.info(`[telegram] Bot started as @${bot?.botInfo?.username}`);
+      console.log(`[telegram] Bot started as @${bot?.botInfo?.username}`);
     },
   });
 }
