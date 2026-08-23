@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useDashboard } from '../hooks/useDashboard';
 import { useTransactions } from '../hooks/useTransactions';
-import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { ArrowUpRight, ArrowDownRight, Wallet, PieChart, BarChart3, Clock, CheckSquare, CreditCard, Lightbulb, Calendar, TrendingUp, TrendingDown, DollarSign, Receipt } from 'lucide-react';
 import { PieChart as RePie, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import dayjs from 'dayjs';
@@ -32,26 +31,26 @@ export default function Dashboard() {
   const [incomeTx, setIncomeTx] = useState<any[]>([]);
   const [loadingExtras, setLoadingExtras] = useState(true);
 
-  const loadExtras = async () => {
-    try {
-      const [billsData, incomeData] = await Promise.all([
-        api('/api/bills').catch(() => []),
-        api(`/api/dashboard/income-detail?month=${encodeURIComponent(month)}`).catch(() => []),
-      ]);
-      const mappedBills = Array.isArray(billsData)
-        ? billsData.map((b: any) => ({ ...b, categoryName: b.category?.name || '-' }))
-        : [];
-      setBills(mappedBills);
-      setIncomeTx(Array.isArray(incomeData) ? incomeData : []);
-    } catch {
-      // silent
-    } finally {
-      setLoadingExtras(false);
-    }
-  };
-
-  useAutoRefresh(loadExtras, [month]);
-
+  useEffect(() => {
+    const loadExtras = async () => {
+      try {
+        const [billsData, incomeData] = await Promise.all([
+          api('/api/bills').catch(() => []),
+          api(`/api/dashboard/income-detail?month=${encodeURIComponent(month)}`).catch(() => []),
+        ]);
+        const mappedBills = Array.isArray(billsData)
+          ? billsData.map((b: any) => ({ ...b, categoryName: b.category?.name || '-' }))
+          : [];
+        setBills(mappedBills);
+        setIncomeTx(Array.isArray(incomeData) ? incomeData : []);
+      } catch {
+        // silent
+      } finally {
+        setLoadingExtras(false);
+      }
+    };
+    loadExtras();
+  }, [month]);
   const now = dayjs(month + '-01');
   const monthStart = now.startOf('month');
   const monthEnd = now.endOf('month');

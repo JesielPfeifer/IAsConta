@@ -17,6 +17,8 @@ export interface Transaction {
   totalInstallments?: number;
   currentInstallment?: number;
   isFixed?: boolean;
+  isCreditCard?: boolean;
+  billId?: string | null;
 }
 
 interface Filters {
