@@ -1,3 +1,4 @@
+import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { PrismaClient, Prisma } from "@prisma/client";
@@ -174,7 +175,7 @@ router.get("/card-cycle", async (req: Request, res: Response) => {
     result.sort((a, b) => (b.total || 0) - (a.total || 0));
     res.json(result);
   } catch (err) {
-    console.error("[transactions] card-cycle:", err);
+    logger.error("[transactions] card-cycle:", err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -208,7 +209,7 @@ router.get("/", async (req: Request, res: Response) => {
 
     res.json(transactions);
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -233,7 +234,7 @@ router.post("/", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -308,7 +309,7 @@ router.put("/:id", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -359,7 +360,7 @@ router.delete("/:id", async (req: Request, res: Response) => {
 
     res.json({ message: "Transação removida" });
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -376,7 +377,7 @@ router.post("/import", upload.single("file"), async (req: Request, res: Response
 
     res.json({ message: "Arquivo recebido, processamento pendente", received: true, filename: file.originalname });
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -497,7 +498,7 @@ botRouter.post("/", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -533,7 +534,7 @@ botRouter.put("/:id", async (req: Request, res: Response) => {
 
     res.json(transaction);
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -569,7 +570,7 @@ botRouter.put("/:id", async (req: Request, res: Response) => {
 
     res.json(transaction);
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });

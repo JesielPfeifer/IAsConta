@@ -1,3 +1,4 @@
+import { logger } from '../../lib/logger.js';
 /**
  * Pluggy sync engine: pulls accounts, transactions and credit card faturas
  * from Pluggy into the IAsConta data model.
@@ -429,7 +430,7 @@ async function syncBankAccount(
       });
       if (legacy) {
         await prisma.transaction.delete({ where: { id: legacy.id } });
-        console.log(`[pluggy-sync] removido pagamento de fatura legado: ${tx.description} (${tx.id})`);
+        logger.info(`[pluggy-sync] removido pagamento de fatura legado: ${tx.description} (${tx.id})`);
       }
       continue;
     }
@@ -549,7 +550,7 @@ async function syncCreditCard(
         });
         if (legacy) {
           await prisma.transaction.delete({ where: { id: legacy.id } });
-          console.log(`[pluggy-sync] removido pagamento de fatura legado: ${tx.description} (${tx.id})`);
+          logger.info(`[pluggy-sync] removido pagamento de fatura legado: ${tx.description} (${tx.id})`);
         }
       }
       continue;
@@ -779,7 +780,7 @@ export async function handlePluggyWebhook(body: Record<string, unknown>): Promis
     const result = await syncItem(itemId, connection.userId);
     return `${eventName || "webhook"}: ${result.transactionsCreated} criadas, ${result.transactionsUpdated} atualizadas, ${result.billsCreated} faturas criadas`;
   } catch (err) {
-    console.error(`[pluggy-webhook] sync falhou para item ${itemId}:`, err);
+    logger.error(`[pluggy-webhook] sync falhou para item ${itemId}:`, err);
     return null;
   }
 }
