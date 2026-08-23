@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../api/client';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import BillForm from '../components/BillForm';
 import ConfirmModal from '../components/ConfirmModal';
 import { Plus, Check, Trash2, Pencil, X, ChevronDown, Calendar, Clock, CheckCircle2, AlertTriangle, type LucideIcon } from 'lucide-react';
@@ -99,7 +100,7 @@ export default function Bills() {
     finally { setLoading(false); }
   }
 
-  useEffect(() => { loadBills(); }, []);
+  useAutoRefresh(loadBills, []);
 
   async function togglePaid(bill: Bill) {
     await api(`/api/bills/${bill.id}`, {
@@ -281,7 +282,7 @@ export default function Bills() {
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-400" />
             </div>
           ) : filteredBills.length === 0 ? (
-            <p className="text-gray-500 text-center py-12">Nenhuma conta cadastrada neste mes</p>
+            <p className="text-gray-500 text-center py-12">Nenhuma conta cadastrada neste mês</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -301,7 +302,7 @@ export default function Bills() {
                     <th className="px-4 py-3 font-medium">Responsavel</th>
                     <th className="px-4 py-3 font-medium">Parcelas</th>
                     <th className="px-4 py-3 font-medium">Status</th>
-                    <th className="px-4 py-3 font-medium text-right">Acoes</th>
+                    <th className="px-4 py-3 font-medium text-right">Ações</th>
                   </tr>
                 </thead>
                 <tbody>

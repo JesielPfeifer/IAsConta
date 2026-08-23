@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { Wallet, Calculator, TrendingDown, TrendingUp, Receipt, Plus, Trash2, ChevronDown, Check } from 'lucide-react';
 import { api } from '../api/client';
 import dayjs from 'dayjs';
+import FixedIncomesCard from '../components/FixedIncomesCard';
 import 'dayjs/locale/pt-br';
 
 dayjs.locale('pt-br');
@@ -261,7 +262,7 @@ export default function Salary() {
         </div>
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight">Salario</h1>
-          <p className="text-sm text-gray-500">Calculo de salario liquido com adicionais e descontos</p>
+          <p className="text-sm text-gray-500">Calculo de salário líquido com adicionais e descontos</p>
         </div>
       </div>
 
@@ -502,10 +503,12 @@ export default function Salary() {
             {registerError && <p className="text-sm text-red-400">{registerError}</p>}
             {!registerError && !registered && (
               <p className="text-xs text-gray-500">
-                Registra o salario liquido de {formatCurrency(calc.netSalary)} como receita do casal em {dayjs().format('MMMM YYYY')}.
+                Registra o salário líquido de {formatCurrency(calc.netSalary)} como receita do casal em {dayjs().format('MMMM YYYY')}.
               </p>
             )}
           </div>
+
+          <FixedIncomesCard />
         </div>
       </div>
     </div>

@@ -51,7 +51,7 @@ export default function Login() {
               {isRegister ? 'Criar Conta' : 'Entrar'}
             </h2>
             <p className="text-center text-sm text-gray-500 mt-1">
-              {isRegister ? 'Comece a controlar suas financas' : 'Bem-vindo de volta'}
+              {isRegister ? 'Comece a controlar suas finanças' : 'Bem-vindo de volta'}
             </p>
           </div>
 

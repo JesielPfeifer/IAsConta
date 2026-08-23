@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api/client';
+import { useAutoRefresh } from './useAutoRefresh';
 
 export interface Transaction {
   id: string;
@@ -17,6 +18,8 @@ export interface Transaction {
   totalInstallments?: number;
   currentInstallment?: number;
   isFixed?: boolean;
+  isCreditCard?: boolean;
+  billId?: string | null;
 }
 
 interface Filters {
@@ -60,9 +63,7 @@ export function useTransactions(filters: Filters = {}) {
     }
   }, [buildQuery]);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  useAutoRefresh(refresh, [buildQuery]);
 
   const create = async (txData: Omit<Transaction, 'id' | 'categoryName'>) => {
     await api('/api/transactions', {
