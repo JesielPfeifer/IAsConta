@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { Wallet, Calculator, TrendingDown, TrendingUp, Receipt, Plus, Trash2, ChevronDown, Check } from 'lucide-react';
 import { api } from '../api/client';
 import dayjs from 'dayjs';
+import FixedIncomesCard from '../components/FixedIncomesCard';
 import 'dayjs/locale/pt-br';
 
 dayjs.locale('pt-br');
@@ -506,6 +507,8 @@ export default function Salary() {
               </p>
             )}
           </div>
+
+          <FixedIncomesCard />
         </div>
       </div>
     </div>
