@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link2, RefreshCw, Trash2, Landmark, CheckCircle2, XCircle, Loader2, Webhook, Paperclip } from 'lucide-react';
 import { api } from '../api/client';
-import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
 interface PluggyConnection {
   id: string;
@@ -92,7 +91,9 @@ export default function PluggySettingsCard() {
     }
   }, [loadConnections]);
 
-  useAutoRefresh(loadAll, []);
+  useEffect(() => {
+    loadAll();
+  }, [loadAll]);
 
   async function handleSave() {
     setSaving(true);

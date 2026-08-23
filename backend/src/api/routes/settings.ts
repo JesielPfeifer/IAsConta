@@ -1,4 +1,3 @@
-import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { authMiddleware } from "../middleware/auth.js";
@@ -59,7 +58,7 @@ router.get("/", async (req: Request, res: Response) => {
     
     res.json(sanitizeSettings(normalized));
   } catch (err) {
-    logger.error("[settings] get error:", err);
+    console.error("[settings] get error:", err);
     res.status(500).json({ error: "Erro ao buscar configuracoes" });
   }
 });
@@ -84,7 +83,7 @@ router.put("/", async (req: Request, res: Response) => {
     // Never echo the secret back to the client
     res.json(sanitizeSettings(settings as unknown as Record<string, unknown>));
   } catch (err) {
-    logger.error("[settings] put error:", err);
+    console.error("[settings] put error:", err);
     res.status(500).json({ error: "Erro ao salvar configuracoes" });
   }
 });

@@ -1,4 +1,3 @@
-import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import crypto from "crypto";
 import { PrismaClient } from "@prisma/client";
@@ -56,7 +55,7 @@ router.get("/status", async (req: Request, res: Response) => {
       webhookUrl: pluggyWebhookUrl(),
     });
   } catch (err) {
-    logger.error("[pluggy] status:", err);
+    console.error("[pluggy] status:", err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -76,7 +75,7 @@ router.get("/connectors", async (req: Request, res: Response) => {
     const connectors = await client.listConnectors(search, sandbox);
     res.json(connectors);
   } catch (err) {
-    logger.error("[pluggy] listConnectors:", err);
+    console.error("[pluggy] listConnectors:", err);
     res.status(500).json({ error: err instanceof PluggyError ? err.message : "Erro interno" });
   }
 });
@@ -100,7 +99,7 @@ router.post("/connect-token", async (req: Request, res: Response) => {
     });
     res.json({ accessToken: token });
   } catch (err) {
-    logger.error("[pluggy] connect-token:", err);
+    console.error("[pluggy] connect-token:", err);
     res.status(500).json({ error: err instanceof PluggyError ? err.message : "Erro interno" });
   }
 });
@@ -146,7 +145,7 @@ router.post("/items", async (req: Request, res: Response) => {
 
     res.status(201).json(item);
   } catch (err) {
-    logger.error("[pluggy] create item:", err);
+    console.error("[pluggy] create item:", err);
     res.status(500).json({ error: err instanceof PluggyError ? err.message : "Erro interno" });
   }
 });
@@ -226,7 +225,7 @@ router.post("/items/attach", async (req: Request, res: Response) => {
       },
     });
   } catch (err) {
-    logger.error("[pluggy] attach item:", err);
+    console.error("[pluggy] attach item:", err);
     res.status(500).json({ error: err instanceof PluggyError ? err.message : "Erro interno" });
   }
 });
@@ -258,7 +257,7 @@ router.get("/items", async (req: Request, res: Response) => {
 
     res.json(enriched);
   } catch (err) {
-    logger.error("[pluggy] list items:", err);
+    console.error("[pluggy] list items:", err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -312,7 +311,7 @@ router.post("/items/:itemId/sync", async (req: Request, res: Response) => {
     const result = await syncItem(itemId, user.id);
     res.json(result);
   } catch (err) {
-    logger.error("[pluggy] sync:", err);
+    console.error("[pluggy] sync:", err);
     res.status(500).json({ error: err instanceof Error ? err.message : "Erro interno" });
   }
 });
@@ -324,7 +323,7 @@ router.post("/sync-all", async (req: Request, res: Response) => {
     const results = await syncAllForUser(user.id);
     res.json(results);
   } catch (err) {
-    logger.error("[pluggy] sync-all:", err);
+    console.error("[pluggy] sync-all:", err);
     res.status(500).json({ error: err instanceof Error ? err.message : "Erro interno" });
   }
 });
@@ -348,7 +347,7 @@ router.post("/items/:itemId/update", async (req: Request, res: Response) => {
     const item = await client.updateItem(itemId);
     res.json(item);
   } catch (err) {
-    logger.error("[pluggy] update item:", err);
+    console.error("[pluggy] update item:", err);
     res.status(500).json({ error: err instanceof PluggyError ? err.message : "Erro interno" });
   }
 });
@@ -377,7 +376,7 @@ router.post("/items/:itemId/mfa", async (req: Request, res: Response) => {
     const item = await client.sendItemMFA(itemId, mfa);
     res.json(item);
   } catch (err) {
-    logger.error("[pluggy] mfa:", err);
+    console.error("[pluggy] mfa:", err);
     res.status(500).json({ error: err instanceof PluggyError ? err.message : "Erro interno" });
   }
 });
@@ -418,7 +417,7 @@ router.delete("/items/:itemId", async (req: Request, res: Response) => {
         await client.deleteItem(itemId);
       } catch (err) {
         // Item may already be gone on Pluggy's side — continue cleanup
-        logger.warn("[pluggy] delete item remoto falhou:", (err as Error).message);
+        console.warn("[pluggy] delete item remoto falhou:", (err as Error).message);
       }
     }
 
@@ -435,7 +434,7 @@ router.delete("/items/:itemId", async (req: Request, res: Response) => {
 
     res.json({ ok: true });
   } catch (err) {
-    logger.error("[pluggy] delete item:", err);
+    console.error("[pluggy] delete item:", err);
     res.status(500).json({ error: err instanceof Error ? err.message : "Erro interno" });
   }
 });
@@ -473,7 +472,7 @@ router.post("/webhooks/register", async (req: Request, res: Response) => {
     }
     res.json({ ok: true, results });
   } catch (err) {
-    logger.error("[pluggy] register webhooks:", err);
+    console.error("[pluggy] register webhooks:", err);
     res.status(500).json({ error: err instanceof PluggyError ? err.message : "Erro interno" });
   }
 });
@@ -487,7 +486,7 @@ router.post("/webhook", async (req: Request, res: Response) => {
   // boot without it): skipping the check would accept unauthenticated
   // webhook requests and let anyone trigger syncs.
   if (!expected) {
-    logger.error("[pluggy-webhook] FATAL: PLUGGY_WEBHOOK_SECRET not configured");
+    console.error("[pluggy-webhook] FATAL: PLUGGY_WEBHOOK_SECRET not configured");
     res.status(500).json({ error: "Server misconfiguration" });
     return;
   }
@@ -498,14 +497,14 @@ router.post("/webhook", async (req: Request, res: Response) => {
   }
 
   const body = (req.body || {}) as Record<string, unknown>;
-  logger.info("[pluggy-webhook] evento:", body.event || body.eventName, "item:", body.itemId);
+  console.log("[pluggy-webhook] evento:", body.event || body.eventName, "item:", body.itemId);
 
   try {
     const summary = await handlePluggyWebhook(body);
-    if (summary) logger.info("[pluggy-webhook]", summary);
+    if (summary) console.log("[pluggy-webhook]", summary);
     res.sendStatus(200);
   } catch (err) {
-    logger.error("[pluggy-webhook] erro:", err);
+    console.error("[pluggy-webhook] erro:", err);
     res.sendStatus(200); // always ack to avoid Pluggy retry storms
   }
 });

@@ -1,4 +1,3 @@
-import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { authMiddleware } from "../middleware/auth.js";
@@ -251,7 +250,7 @@ router.get("/summary", async (req: Request, res: Response) => {
       },
     });
   } catch (err) {
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -302,7 +301,7 @@ router.get("/by-category", async (req: Request, res: Response) => {
 
     res.json(result);
   } catch (err) {
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -378,7 +377,7 @@ router.get("/percentage", async (req: Request, res: Response) => {
       wife: { expense: wifeExpense, salary: wifeSalary, percentage: Math.round(wifePercentage * 100) / 100 },
     });
   } catch (err) {
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -413,7 +412,7 @@ router.get("/by-payment", async (req: Request, res: Response) => {
     result.sort((a, b) => b.total - a.total);
     res.json(result);
   } catch (err) {
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -437,7 +436,7 @@ router.get("/credit-card-total", async (req: Request, res: Response) => {
 
     res.json({ total, count: transactions.length });
   } catch (err) {
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -478,7 +477,7 @@ router.get("/comparison", async (req: Request, res: Response) => {
       diffPercent: Math.round(diffPercent),
     });
   } catch (err) {
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -534,7 +533,7 @@ router.get("/year-analysis", async (req: Request, res: Response) => {
       allMonths: months,
     });
   } catch (err) {
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -602,7 +601,7 @@ router.get("/tip", async (req: Request, res: Response) => {
         : "Registre seus gastos para receber dicas personalizadas.";
     res.json({ tip: fallback, topCategories });
   } catch (err) {
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -635,7 +634,7 @@ router.get("/credit-card-detail", async (req: Request, res: Response) => {
 
     res.json(result);
   } catch (err) {
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -656,7 +655,7 @@ router.get("/income-detail", async (req: Request, res: Response) => {
 
     res.json(transactions);
   } catch (err) {
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });

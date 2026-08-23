@@ -1,4 +1,3 @@
-import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { authMiddleware } from "../middleware/auth.js";
@@ -102,7 +101,7 @@ router.get("/", async (req: Request, res: Response) => {
       },
     });
   } catch (err) {
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });

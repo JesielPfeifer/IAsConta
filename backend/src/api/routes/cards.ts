@@ -1,4 +1,3 @@
-import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { authMiddleware } from "../middleware/auth.js";

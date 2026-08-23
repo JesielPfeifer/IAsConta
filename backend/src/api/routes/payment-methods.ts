@@ -1,4 +1,3 @@
-import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { authMiddleware } from "../middleware/auth.js";
@@ -18,7 +17,7 @@ router.get("/", async (req: Request, res: Response) => {
     });
     res.json(methods);
   } catch (err) {
-    logger.error("[payment-methods] list:", err);
+    console.error("[payment-methods] list:", err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -55,7 +54,7 @@ router.post("/", async (req: Request, res: Response) => {
       res.status(409).json({ error: "Já existe um método com esse nome" });
       return;
     }
-    logger.error("[payment-methods] create:", err);
+    console.error("[payment-methods] create:", err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -106,7 +105,7 @@ router.put("/:id", async (req: Request, res: Response) => {
       res.status(409).json({ error: "Já existe um método com esse nome" });
       return;
     }
-    logger.error("[payment-methods] update:", err);
+    console.error("[payment-methods] update:", err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -126,7 +125,7 @@ router.delete("/:id", async (req: Request, res: Response) => {
     await prisma.paymentMethod.delete({ where: { id } });
     res.json({ ok: true });
   } catch (err) {
-    logger.error("[payment-methods] delete:", err);
+    console.error("[payment-methods] delete:", err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
