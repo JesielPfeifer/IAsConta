@@ -219,7 +219,7 @@ export default function PaymentMethodsCard() {
         <select
           value={newType}
           onChange={(e) => setNewType(e.target.value as 'CARD' | 'ACCOUNT')}
-          className="bg-white/[0.03] border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 [color-scheme:dark]"
+          className="bg-gray-800 border border-white/10 rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 [color-scheme:dark]"
         >
           <option value="CARD">Cartão de crédito</option>
           <option value="ACCOUNT">Em conta</option>
