@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { CreditCard, Wallet, Plus, Trash2, Pencil, Check, X, Loader2 } from 'lucide-react';
 import { api } from '../api/client';
-import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
 interface PaymentMethod {
   id: string;
@@ -111,7 +110,9 @@ export default function PaymentMethodsCard() {
     }
   }, []);
 
-  useAutoRefresh(load, []);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   function flash(ok: boolean, text: string) {
     setMsg({ ok, text });
