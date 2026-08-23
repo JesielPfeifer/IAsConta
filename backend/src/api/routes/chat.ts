@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import dayjs from "dayjs";
 import { authMiddleware } from "../middleware/auth.js";
 import { getSetting } from "../services/settings.js";
+import { logger } from "../../lib/logger.js";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -222,10 +223,10 @@ ${ctx}`;
           const reply = data.choices?.[0]?.message?.content;
           if (reply) { res.json({ reply: reply.trim() }); return; }
         } else {
-          console.error("[chat] Groq API error:", response.status);
+          logger.error("[chat] Groq API error:", response.status);
         }
       } catch (err) {
-        console.error("[chat] Groq error:", err);
+        logger.error("[chat] Groq error:", err);
       }
     }
 
@@ -241,7 +242,7 @@ ${ctx}`;
         "Por enquanto consigo responder apenas: saldo, salario e gastos do mes atual.",
     });
   } catch (err) {
-    console.error("[chat] error:", err);
+    logger.error("[chat] error:", err);
     res.status(500).json({ error: "Erro interno ao processar chat" });
   }
 });
