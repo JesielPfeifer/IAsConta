@@ -41,6 +41,14 @@ declare global {
   }
 }
 
+function shortBankName(n: string | null): string {
+  const s = (n || '').toLowerCase();
+  if (s.includes('nubank') || s.startsWith('nu ')) return 'nubank';
+  if (s.includes('caixa')) return 'caixa';
+  const first = s.replace(/s\.?a\.?$/, '').trim().split(/\s+/)[0] || s;
+  return first.replace(/[^a-z0-9]/g, '');
+}
+
 export default function PluggySettingsCard() {
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
@@ -68,23 +76,24 @@ export default function PluggySettingsCard() {
     }
   }, []);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const status = await api('/api/pluggy/status');
-        setUserConfigured(Boolean(status.userConfigured));
-        setGlobalConfigured(Boolean(status.globalConfigured));
-        if (status.userConfigured) {
-          // Client ID comes back; secret never does
-          const settings = await api('/api/settings');
-          setClientId(settings.pluggyClientId || '');
-        }
-        await loadConnections();
-      } catch {
-        // silent
+  const loadAll = useCallback(async () => {
+    try {
+      const status = await api('/api/pluggy/status');
+      setUserConfigured(Boolean(status.userConfigured));
+      setGlobalConfigured(Boolean(status.globalConfigured));
+      if (status.userConfigured) {
+        const settings = await api('/api/settings');
+        setClientId(settings.pluggyClientId || '');
       }
-    })();
+      await loadConnections();
+    } catch {
+      // silent
+    }
   }, [loadConnections]);
+
+  useEffect(() => {
+    loadAll();
+  }, [loadAll]);
 
   async function handleSave() {
     setSaving(true);
@@ -389,7 +398,7 @@ export default function PluggySettingsCard() {
                     <div className="flex items-center gap-3 min-w-0">
                       <Landmark className="w-5 h-5 text-emerald-400 shrink-0" />
                       <div className="min-w-0">
-                        <p className="text-sm font-medium text-white truncate">{conn.bankName}</p>
+                        <p className="text-sm font-medium text-white truncate capitalize">pluggy - {shortBankName(conn.connectorName || conn.bankName)}</p>
                         <p className="text-xs text-gray-500">
                           {conn.lastSyncAt
                             ? `Último sync: ${new Date(conn.lastSyncAt).toLocaleString('pt-BR')}`

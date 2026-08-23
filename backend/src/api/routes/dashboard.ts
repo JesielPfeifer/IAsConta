@@ -1,3 +1,4 @@
+import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { authMiddleware } from "../middleware/auth.js";
@@ -50,19 +51,25 @@ export function filterInternalTransfers<T extends { id: string; type: string; am
   const isInternalTransfer = (tx: T): boolean => {
     if (!TRANSFER_RE.test(tx.description) || !tx.pluggyAccountId) return false;
     const wantedType = tx.type === "EXPENSE" ? "INCOME" : "EXPENSE";
-    return transferCandidates.some((other) => {
+    const matches = transferCandidates.filter((other) => {
       if (other.id === tx.id) return false;
       if (other.type !== wantedType) return false;
       if (other.pluggyAccountId === tx.pluggyAccountId) return false; // same account
       if (Math.abs(Math.abs(other.amount) - Math.abs(tx.amount)) >= 0.01) return false;
       const days = Math.abs(other.date.getTime() - tx.date.getTime()) / 86400000;
       if (days > 3) return false;
-      // Both legs must look like the same transfer (same counterparty/bank
-      // after removing direction words) — not just "any two PIX with the
-      // same value".
-      if (!descriptionsMatchTransferPair(tx.description, other.description)) return false;
       return true;
     });
+    if (matches.length === 0) return false;
+    // Both legs describe the same transfer (same counterparty/bank after
+    // removing direction words) — certainly internal.
+    if (matches.some((o) => descriptionsMatchTransferPair(tx.description, o.description))) return true;
+    // No shared fingerprint (e.g. "PIX RECEBIDO DADOS CONTA" has no name),
+    // but there is a single exact-value counterpart within 3 days between
+    // two DIFFERENT own accounts: overwhelmingly an internal transfer
+    // (own money moved between accounts), otherwise it would inflate totals.
+    // With more than one candidate the fingerprint stays mandatory (safe).
+    return matches.length === 1;
   };
   return transactions.filter((tx) => !isInternalTransfer(tx));
 }
@@ -92,10 +99,31 @@ async function cardTransactionWhere(userId: string, start: Date, end: Date) {
     where: { userId, type: "CARD" },
     select: { name: true },
   });
+  // Apenas COMPRAS de cartão de crédito. Transferências/PIX/TED não são
+  // compras no cartão mesmo quando saem de uma conta de cartão (Pluggy
+  // marca isCreditCard=true nessas transações) — excluímos por padrão de
+  // descrição. Entradas (INCOME) já são excluídas pelo type:"EXPENSE".
+  const notTransfer = [
+    "transferência enviada",
+    "transferência recebida",
+    "pix enviado",
+    "pix recebido",
+    "pix enviad",
+    "recebimento ted",
+    "ted ",
+    "doc enviado",
+    "doc recebido",
+  ].map((s) => ({ NOT: { description: { contains: s, mode: "insensitive" as const } } }));
+  // Filtra pela DATA DA COMPRA (mês civil), igual à lista de transações.
+  // O billForecastMonth (mês da fatura informado pelo Pluggy) NÃO é usado
+  // como critério de filtro, para que uma compra de 18/08 apareça em Agosto
+  // e não "pule" para Setembro só porque a fatura do banco é do mês seguinte.
+  const invoiceFilter = { date: { gte: start, lt: end } };
   return {
     userId,
     type: "EXPENSE" as const,
-    date: { gte: start, lt: end },
+    ...invoiceFilter,
+    AND: notTransfer,
     OR: [
       { isCreditCard: true },
       // Legacy rows: payment method configured as CARD by the user
@@ -223,7 +251,7 @@ router.get("/summary", async (req: Request, res: Response) => {
       },
     });
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -274,7 +302,7 @@ router.get("/by-category", async (req: Request, res: Response) => {
 
     res.json(result);
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -350,7 +378,7 @@ router.get("/percentage", async (req: Request, res: Response) => {
       wife: { expense: wifeExpense, salary: wifeSalary, percentage: Math.round(wifePercentage * 100) / 100 },
     });
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -385,7 +413,7 @@ router.get("/by-payment", async (req: Request, res: Response) => {
     result.sort((a, b) => b.total - a.total);
     res.json(result);
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -409,7 +437,7 @@ router.get("/credit-card-total", async (req: Request, res: Response) => {
 
     res.json({ total, count: transactions.length });
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -450,7 +478,7 @@ router.get("/comparison", async (req: Request, res: Response) => {
       diffPercent: Math.round(diffPercent),
     });
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -506,7 +534,7 @@ router.get("/year-analysis", async (req: Request, res: Response) => {
       allMonths: months,
     });
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -574,7 +602,7 @@ router.get("/tip", async (req: Request, res: Response) => {
         : "Registre seus gastos para receber dicas personalizadas.";
     res.json({ tip: fallback, topCategories });
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -607,7 +635,7 @@ router.get("/credit-card-detail", async (req: Request, res: Response) => {
 
     res.json(result);
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -628,7 +656,7 @@ router.get("/income-detail", async (req: Request, res: Response) => {
 
     res.json(transactions);
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });

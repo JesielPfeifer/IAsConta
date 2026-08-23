@@ -1,3 +1,4 @@
+import { logger } from '../../lib/logger.js';
 /**
  * Pluggy sync engine: pulls accounts, transactions and credit card faturas
  * from Pluggy into the IAsConta data model.
@@ -112,6 +113,19 @@ function resolveOwnerPerson(
   if (normName(user.name) && owner.includes(normName(user.name))) return "HUSBAND";
   if (spouse?.name && owner.includes(normName(spouse.name))) return "WIFE";
   return null;
+}
+
+/** Resolve the amount to store, in the account's currency (BRL).
+ * Pluggy reports a foreign-currency purchase as `amount` in `currencyCode`
+ * (e.g. USD) and `amountInAccountCurrency` as the value already converted to
+ * the account currency. Prefer the converted value so a $10.41 USD purchase is
+ * stored as ~R$ 55,38 instead of R$ 10,41. Falls back to `amount` when the
+ * converted field is absent. */
+function resolveAmount(tx: PluggyTransaction): number {
+  if (typeof tx.amountInAccountCurrency === "number" && !Number.isNaN(tx.amountInAccountCurrency)) {
+    return Math.abs(tx.amountInAccountCurrency);
+  }
+  return Math.abs(tx.amount);
 }
 
 function normalizePaymentMethod(account: PluggyAccount, connectorName?: string | null): string {
@@ -416,7 +430,7 @@ async function syncBankAccount(
       });
       if (legacy) {
         await prisma.transaction.delete({ where: { id: legacy.id } });
-        console.log(`[pluggy-sync] removido pagamento de fatura legado: ${tx.description} (${tx.id})`);
+        logger.info(`[pluggy-sync] removido pagamento de fatura legado: ${tx.description} (${tx.id})`);
       }
       continue;
     }
@@ -432,7 +446,7 @@ async function syncBankAccount(
       : null;
 
     const data = {
-      amount: Math.abs(tx.amount),
+      amount: resolveAmount(tx),
       type,
       description: tx.description,
       date: new Date(tx.date),
@@ -536,7 +550,7 @@ async function syncCreditCard(
         });
         if (legacy) {
           await prisma.transaction.delete({ where: { id: legacy.id } });
-          console.log(`[pluggy-sync] removido pagamento de fatura legado: ${tx.description} (${tx.id})`);
+          logger.info(`[pluggy-sync] removido pagamento de fatura legado: ${tx.description} (${tx.id})`);
         }
       }
       continue;
@@ -555,7 +569,7 @@ async function syncCreditCard(
     // (opcional). Quando totalAmount não vem, o total é reconstruído como
     // parcela × nº de parcelas — nunca armazenamos o total no lugar da
     // parcela, senão o total do cartão no dashboard seria N× maior.
-    const amount = Math.abs(tx.amount);
+    const amount = resolveAmount(tx);
     const totalAmount =
       meta.totalAmount != null
         ? Math.abs(meta.totalAmount)
@@ -582,6 +596,10 @@ async function syncCreditCard(
       isFixed: false,
       isCreditCard: true,
       billId: meta.billId ? (billByExternalId.get(meta.billId) ?? null) : null,
+      // Pluggy already tells us which invoice month this purchase is charged
+      // in (billForecastDate "YYYY-MM") — use it directly instead of inferring
+      // a closing cycle. Null when the field is absent (legacy rows).
+      billForecastMonth: meta.billForecastDate || null,
       pluggyAccountId: account.id,
       totalInstallments,
       currentInstallment,
@@ -602,6 +620,7 @@ async function syncCreditCard(
         existing.date.getTime() !== data.date.getTime() ||
         existing.billId !== data.billId ||
         existing.person !== data.person ||
+        existing.billForecastMonth !== data.billForecastMonth ||
         existing.installmentGroupId !== data.installmentGroupId ||
         existing.currentInstallment !== data.currentInstallment ||
         existing.totalInstallments !== data.totalInstallments;
@@ -615,6 +634,7 @@ async function syncCreditCard(
             date: data.date,
             billId: data.billId,
             person: data.person,
+            billForecastMonth: data.billForecastMonth,
             currentInstallment: data.currentInstallment,
             totalInstallments: data.totalInstallments,
             installmentGroupId: data.installmentGroupId ?? existing.installmentGroupId,
@@ -760,7 +780,7 @@ export async function handlePluggyWebhook(body: Record<string, unknown>): Promis
     const result = await syncItem(itemId, connection.userId);
     return `${eventName || "webhook"}: ${result.transactionsCreated} criadas, ${result.transactionsUpdated} atualizadas, ${result.billsCreated} faturas criadas`;
   } catch (err) {
-    console.error(`[pluggy-webhook] sync falhou para item ${itemId}:`, err);
+    logger.error(`[pluggy-webhook] sync falhou para item ${itemId}:`, err);
     return null;
   }
 }

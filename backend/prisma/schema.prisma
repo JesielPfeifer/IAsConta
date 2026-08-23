@@ -54,6 +54,10 @@ model Transaction {
   billId             String?         // Pluggy credit card bill id (fatura) this tx belongs to
   pluggyAccountId    String?         // Pluggy account id that originated this tx
   totalAmount        Float?          // Total purchase value when paid in installments (amount = monthly parcel)
+  // Mês da fatura (Pluggy creditCardMetadata.billForecastDate, "YYYY-MM") em
+  // que a compra será cobrada. Vem do próprio Pluggy — elimina a necessidade de
+  // adivinhar o ciclo de fechamento. Null para transações antigas/sem dado.
+  billForecastMonth  String?
   userId      String
   user        User            @relation(fields: [userId], references: [id])
   createdAt   DateTime        @default(now())
@@ -125,6 +129,11 @@ model UserSettings {
   geminiApiKey String?
   pluggyClientId String?
   pluggyClientSecret String?
+  // Dia de fechamento da fatura de cada cartão (chave = pluggyAccountId).
+  // Usado para agrupar as compras no ciclo correto da fatura (ex.: Nubank 18,
+  // CAIXA 25). O billForecastDate do Pluggy é instável para alguns emissores,
+  // por isso o ciclo de fechamento é a fonte da verdade.
+  cardInvoiceDays     Json?
   failedLoginAttempts Int    @default(0)
   lockedUntil         DateTime?
   updatedAt  DateTime @updatedAt

@@ -1,3 +1,4 @@
+import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { PrismaClient, Prisma } from "@prisma/client";
@@ -65,6 +66,120 @@ const botTransactionSchema = z.object({
 
 router.use(authMiddleware);
 
+
+// GET /api/transactions/card-cycle?month=YYYY-MM — compras por cartão na fatura
+// do mês informado. O mês da fatura vem direto do Pluggy (billForecastMonth em
+// cada transação); transações antigas sem esse campo caem no mês-civil.
+router.get("/card-cycle", async (req: Request, res: Response) => {
+  const user = req.user!;
+  const month = String(req.query.month || "");
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    res.status(400).json({ error: "month inválido" });
+    return;
+  }
+  const [y, m] = month.split("-").map(Number);
+  const BRT_OFFSET_H = 3; // banco armazena UTC; 00:00 BR = 03:00 UTC
+
+  try {
+    // Cartões de crédito: agrupa por paymentMethod (nome do cartão), unindo
+    // contas sincronizadas (Pluggy) e lançamentos manuais. Assim cada cartão
+    // aparece UMA vez na UI, independente de ter transações Pluggy, manuais ou
+    // ambas.
+    const pmRows = await prisma.transaction.findMany({
+      where: { userId: user.id, isCreditCard: true },
+      select: { pluggyAccountId: true, paymentMethod: true },
+      distinct: ["paymentMethod"],
+    });
+    type Group = { paymentMethod: string };
+    const groups: Group[] = pmRows
+      .map((r) => ({ paymentMethod: r.paymentMethod || "Cartão" }))
+      .filter((v, i, arr) => arr.findIndex((x) => x.paymentMethod === v.paymentMethod) === i);
+
+    // Dia de fechamento por paymentMethod: do cardInvoiceDays configurado (pela
+    // conta Pluggy correspondente), ou inferido do vencimento (dueDate) das
+    // faturas Pluggy, ou 25 por padrão.
+    const userSettings = await prisma.userSettings.findUnique({ where: { userId: user.id } });
+    const cardCfg: any = (userSettings?.cardInvoiceDays as any) || {};
+    const pluggyRows = await prisma.transaction.findMany({
+      where: { userId: user.id, isCreditCard: true, pluggyAccountId: { not: null } },
+      select: { pluggyAccountId: true, paymentMethod: true },
+      distinct: ["pluggyAccountId", "paymentMethod"],
+    });
+    const pluggyIds = pluggyRows.map((r) => r.pluggyAccountId).filter(Boolean) as string[];
+    const bills = await prisma.bill.findMany({
+      where: { userId: user.id, source: "PLUGGY", pluggyAccountId: { in: pluggyIds } },
+      orderBy: { dueDate: "desc" },
+      select: { pluggyAccountId: true, dueDate: true },
+    });
+    const inferredDay: Record<string, number> = {};
+    for (const b of bills) {
+      if (b.pluggyAccountId && !inferredDay[b.pluggyAccountId]) inferredDay[b.pluggyAccountId] = b.dueDate.getUTCDate();
+    }
+    // paymentMethod -> dia de fechamento (da conta Pluggy com esse nome)
+    const pmDay: Record<string, number> = {};
+    for (const r of pluggyRows) {
+      const accId = r.pluggyAccountId as string;
+      const d = cardCfg[accId] || inferredDay[accId];
+      const pm = r.paymentMethod || "";
+      if (d && !pmDay[pm]) pmDay[pm] = d;
+    }
+    const closingDay = (pm: string) => pmDay[pm] || 25;
+
+    const result = [];
+
+    for (const g of groups) {
+      const pm = g.paymentMethod;
+      const D = closingDay(pm);
+      // Ciclo da fatura (horário do Brasil, UTC-3): cobre do dia D do mês
+      // anterior INCLUSIVE até o dia D do mês atual EXCLUSIVE.
+      // Ex.: fechamento dia 25 => 25/JUL 00:00 até 25/AGO 00:00 (BR).
+      const start = new Date(Date.UTC(y, m - 2, D, BRT_OFFSET_H));
+      const endExclusive = new Date(Date.UTC(y, m - 1, D, BRT_OFFSET_H));
+      const txs = await prisma.transaction.findMany({
+        where: {
+          userId: user.id,
+          isCreditCard: true,
+          paymentMethod: pm,
+          date: { gte: start, lt: endExclusive },
+        },
+        orderBy: { date: "desc" },
+        include: { category: { select: { name: true } } },
+      });
+
+      const paymentMethod = pm || txs[0]?.paymentMethod || "Cartão";
+      const total = txs.reduce((s, t) => s + Math.abs(t.amount), 0);
+      result.push({
+        id: paymentMethod,
+        pluggyAccountId: txs[0]?.pluggyAccountId ?? null,
+        paymentMethod,
+        invoiceDay: D,
+        // Exibição: limites do ciclo da fatura (calendário BR).
+        start: start.toISOString(),
+        // último dia que entra na fatura = D-1 do mês atual (calendário BR)
+        end: new Date(Date.UTC(y, m - 1, D - 1, BRT_OFFSET_H)).toISOString(),
+        total: Math.round(total * 100) / 100,
+        count: txs.length,
+        txs: txs.map((t) => ({
+          id: t.id,
+          date: t.date,
+          description: t.description,
+          amount: Math.abs(t.amount),
+          paymentMethod: t.paymentMethod,
+          categoryName: t.category?.name || null,
+          person: t.person,
+          type: t.type,
+        })),
+      });
+    }
+
+    result.sort((a, b) => (b.total || 0) - (a.total || 0));
+    res.json(result);
+  } catch (err) {
+    logger.error("[transactions] card-cycle:", err);
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
 router.get("/", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
@@ -94,7 +209,7 @@ router.get("/", async (req: Request, res: Response) => {
 
     res.json(transactions);
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -119,7 +234,7 @@ router.post("/", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -194,7 +309,7 @@ router.put("/:id", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -209,7 +324,10 @@ router.delete("/:id", async (req: Request, res: Response) => {
     });
 
     if (!existing) {
-      res.status(404).json({ error: "Transação não encontrada" });
+      // Idempotente: se a transação já não existe, considera removida. Evita
+      // 404 em exclusões em lote/parceladas, onde a exclusão em cascata de uma
+      // parcela já removeu as irmãs selecionadas.
+      res.json({ message: "Transação já removida" });
       return;
     }
 
@@ -242,7 +360,7 @@ router.delete("/:id", async (req: Request, res: Response) => {
 
     res.json({ message: "Transação removida" });
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -259,7 +377,7 @@ router.post("/import", upload.single("file"), async (req: Request, res: Response
 
     res.json({ message: "Arquivo recebido, processamento pendente", received: true, filename: file.originalname });
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -380,7 +498,7 @@ botRouter.post("/", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -416,7 +534,43 @@ botRouter.put("/:id", async (req: Request, res: Response) => {
 
     res.json(transaction);
   } catch (err) {
-    console.error(err);
+    logger.error(err);
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+// Bot-authenticated PUT for updating transactions (isFixed, installments, etc.)
+botRouter.put("/:id", async (req: Request, res: Response) => {
+  try {
+    const userId = await getBotUserId(req);
+    if (!userId) {
+      res.status(400).json({ error: "No user found" });
+      return;
+    }
+
+    const { id } = req.params;
+    const existing = await prisma.transaction.findFirst({
+      where: { id: id as string, userId },
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Transação não encontrada" });
+      return;
+    }
+
+    const updateData: Record<string, unknown> = {};
+    if (req.body.isFixed !== undefined) updateData.isFixed = req.body.isFixed;
+    if (req.body.totalInstallments !== undefined) updateData.totalInstallments = req.body.totalInstallments;
+    if (req.body.currentInstallment !== undefined) updateData.currentInstallment = req.body.currentInstallment;
+    if (req.body.installmentGroupId !== undefined) updateData.installmentGroupId = req.body.installmentGroupId;
+
+    const transaction = await prisma.transaction.update({
+      where: { id: id as string },
+      data: updateData as any,
+    });
+
+    res.json(transaction);
+  } catch (err) {
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });

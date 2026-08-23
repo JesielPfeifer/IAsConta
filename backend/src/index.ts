@@ -20,6 +20,7 @@ import whatsappUserRoutes from "./api/routes/whatsapp-users.js";
 import paymentMethodRoutes from "./api/routes/payment-methods.js";
 import fixedIncomeRoutes from "./api/routes/fixed-incomes.js";
 import pluggyRoutes from "./api/routes/pluggy.js";
+import cardsRoutes from "./api/routes/cards.js";
 import settingsRoutes from "./api/routes/settings.js";
 import annualRoutes from "./api/routes/annual.js";
 import { startWhatsApp, sendMessage } from "./bot/platforms/whatsapp.js";
@@ -83,6 +84,7 @@ app.use("/api/whatsapp-users", whatsappUserRoutes);
 app.use("/api/payment-methods", paymentMethodRoutes);
 app.use("/api/fixed-incomes", fixedIncomeRoutes);
 app.use("/api/pluggy", pluggyRoutes);
+app.use("/api/cards", cardsRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/annual", annualRoutes);
 

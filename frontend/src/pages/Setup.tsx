@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import { QrCode, CheckCircle2, Loader2, RefreshCw, Power, Smartphone, Save, Users, Bot, MessageCircle, Search } from 'lucide-react';
 import { api } from '../api/client';
 import PluggySettingsCard from '../components/PluggySettingsCard';
+import CardInvoiceSettings from '../components/CardInvoiceSettings';
 import PaymentMethodsCard from '../components/PaymentMethodsCard';
 
 interface UserSettings {
@@ -289,7 +290,7 @@ export default function Setup() {
         {!qrLoading && !qrError && !connected && !qrcode && waStatus.exists && (
           <div className="flex flex-col items-center gap-4 py-8">
             <QrCode className="w-12 h-12 text-gray-600" />
-            <p className="text-gray-400 text-sm">Instancia nao conectada</p>
+            <p className="text-gray-400 text-sm">Instancia não conectada</p>
             <button onClick={fetchQR}
               className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-xl text-sm font-semibold transition-colors">
               <QrCode className="w-4 h-4" />Gerar QR Code
@@ -311,6 +312,7 @@ export default function Setup() {
 
       {/* Pluggy Open Finance */}
       <PluggySettingsCard />
+      <CardInvoiceSettings />
 
       {/* Payment Methods */}
       <PaymentMethodsCard />
@@ -333,12 +335,12 @@ export default function Setup() {
               <div className="mt-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
                 <p className="text-sm text-emerald-400 font-medium">✅ Grupo "{foundGroupName}" encontrado!</p>
                 <p className="text-xs text-emerald-400/60 mt-1">ID: {form.whatsappGroupId}</p>
-                <p className="text-xs text-gray-500 mt-2">⚠️ Role a pagina e clique em <strong>Salvar Configuracoes</strong> para aplicar.</p>
+                <p className="text-xs text-gray-500 mt-2">⚠️ Role a página e clique em <strong>Salvar Configuracoes</strong> para aplicar.</p>
               </div>
             )}
             {groupFound === 'notfound' && (
               <div className="mt-3 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
-                <p className="text-sm text-red-400">❌ Grupo nao encontrado</p>
+                <p className="text-sm text-red-400">❌ Grupo não encontrado</p>
                 <p className="text-xs text-red-400/60 mt-1">Verifique se ha um WhatsApp conectado e o nome esta correto.</p>
               </div>
             )}
@@ -391,13 +393,13 @@ export default function Setup() {
       {/* Exemplos */}
       <section className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-4">
         <h2 className="text-lg font-semibold text-white">Exemplos de Mensagens</h2>
-        <p className="text-sm text-gray-400">Envie no grupo (ou no privado se nao configurou grupo):</p>
+        <p className="text-sm text-gray-400">Envie no grupo (ou no privado se não configurou grupo):</p>
         <div className="space-y-2 text-sm">
           <MsgExample msg="gastei 50 no supermercado" desc="Registra despesa de R$50" />
-          <MsgExample msg="recebi 3000 de salario" desc="Registra receita de R$3.000" />
-          <MsgExample msg="paguei 120 na farmacia" desc="Registra despesa na farmacia" />
+          <MsgExample msg="recebi 3000 de salário" desc="Registra receita de R$3.000" />
+          <MsgExample msg="paguei 120 na farmácia" desc="Registra despesa na farmácia" />
           <MsgExample msg="lembrete: pagar luz dia 25" desc="Cria lembrete para conta" />
-          <MsgExample msg="gastei 200 com roupa" desc="Registra despesa em vestuario" />
+          <MsgExample msg="gastei 200 com roupa" desc="Registra despesa em vestuário" />
         </div>
       </section>
     </div>

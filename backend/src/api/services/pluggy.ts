@@ -369,6 +369,9 @@ export interface PluggyTransaction {
   descriptionRaw?: string | null;
   currencyCode: string;
   amount: number; // negative = money out
+  /** Value already converted to the account's currency (BRL). Present for
+   *  foreign-currency purchases (amount is then in `currencyCode`, e.g. USD). */
+  amountInAccountCurrency?: number | null;
   date: string;
   type: "DEBIT" | "CREDIT";
   status: "POSTED" | "PENDING";
