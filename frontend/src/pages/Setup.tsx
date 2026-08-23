@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import { QrCode, CheckCircle2, Loader2, RefreshCw, Power, Smartphone, Save, Users, Bot, MessageCircle, Search } from 'lucide-react';
 import { api } from '../api/client';
 import PluggySettingsCard from '../components/PluggySettingsCard';
-import CardInvoiceSettings from '../components/CardInvoiceSettings';
 import PaymentMethodsCard from '../components/PaymentMethodsCard';
 
 interface UserSettings {
@@ -312,7 +311,6 @@ export default function Setup() {
 
       {/* Pluggy Open Finance */}
       <PluggySettingsCard />
-      <CardInvoiceSettings />
 
       {/* Payment Methods */}
       <PaymentMethodsCard />
