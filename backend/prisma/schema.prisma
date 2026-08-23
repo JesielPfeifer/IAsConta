@@ -24,7 +24,12 @@ model User {
   categories      Category[]
   bills           Bill[]
   budgets         Budget[]
+  goals           Goal[]
+  investments     Investment[]
+  whatsappUsers   WhatsAppUser[]
   bankConnections BankConnection[]
+  paymentMethods  PaymentMethod[]
+  fixedIncomes    FixedIncome[]
 }
 
 model Transaction {
@@ -41,10 +46,23 @@ model Transaction {
   paymentMethod      String?
   totalInstallments  Int             @default(1)
   currentInstallment Int             @default(1)
+  installmentGroupId String?
   isFixed            Boolean         @default(false)
+  // Pluggy integration
+  externalId         String?         // Pluggy transaction id (dedupe)
+  isCreditCard       Boolean         @default(false)
+  billId             String?         // Pluggy credit card bill id (fatura) this tx belongs to
+  pluggyAccountId    String?         // Pluggy account id that originated this tx
+  totalAmount        Float?          // Total purchase value when paid in installments (amount = monthly parcel)
+  // Mês da fatura (Pluggy creditCardMetadata.billForecastDate, "YYYY-MM") em
+  // que a compra será cobrada. Vem do próprio Pluggy — elimina a necessidade de
+  // adivinhar o ciclo de fechamento. Null para transações antigas/sem dado.
+  billForecastMonth  String?
   userId      String
   user        User            @relation(fields: [userId], references: [id])
   createdAt   DateTime        @default(now())
+
+  @@unique([userId, externalId])
 }
 
 model Category {
@@ -73,9 +91,15 @@ model Bill {
   category          Category? @relation(fields: [categoryId], references: [id])
   totalInstallments Int       @default(1)
   currentInstallment Int      @default(1)
+  // Pluggy integration (credit card faturas)
+  source            Source    @default(MANUAL)
+  externalId        String?   // Pluggy bill id (fatura) — dedupe
+  pluggyAccountId   String?   // Pluggy credit card account id
   userId            String
   user              User      @relation(fields: [userId], references: [id])
   createdAt         DateTime  @default(now())
+
+  @@unique([userId, externalId])
 }
 
 model Budget {
@@ -103,12 +127,74 @@ model UserSettings {
   discordToken String?
   telegramToken String?
   geminiApiKey String?
+  pluggyClientId String?
+  pluggyClientSecret String?
+  // Dia de fechamento da fatura de cada cartão (chave = pluggyAccountId).
+  // Usado para agrupar as compras no ciclo correto da fatura (ex.: Nubank 18,
+  // CAIXA 25). O billForecastDate do Pluggy é instável para alguns emissores,
+  // por isso o ciclo de fechamento é a fonte da verdade.
+  cardInvoiceDays     Json?
+  failedLoginAttempts Int    @default(0)
+  lockedUntil         DateTime?
   updatedAt  DateTime @updatedAt
 }
 
 model BankConnection {
+  id           String    @id @default(uuid())
+  bankName     String
+  // Pluggy integration
+  itemId       String?   @unique // Pluggy item id
+  connectorId  Int?
+  connectorName String?
+  status       String?          // Pluggy item status (LOGIN_OK, LOGIN_ERROR, ...)
+  lastSyncAt   DateTime?
+  errorMessage String?
+  // Pluggy account ids belonging to this item — persisted at sync time so the
+  // DELETE cleanup only removes THIS connection's imported data.
+  accountIds   String[]  @default([])
+  userId       String
+  user         User      @relation(fields: [userId], references: [id])
+  createdAt    DateTime  @default(now())
+}
+
+model WhatsAppUser {
+  id           String   @id @default(uuid())
+  phone        String?
+  instanceName String   @unique
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id])
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Goal {
+  id          String      @id @default(uuid())
+  name        String
+  totalAmount Float
+  targetDate  DateTime?
+  userId      String
+  user        User        @relation(fields: [userId], references: [id])
+  createdAt   DateTime    @default(now())
+  months      GoalMonth[]
+}
+
+model GoalMonth {
+  id     String @id @default(uuid())
+  goalId String
+  goal   Goal   @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  month  String // "2026-01"
+  amount Float  @default(0)
+
+  @@unique([goalId, month])
+}
+
+model Investment {
   id        String   @id @default(uuid())
-  bankName  String
+  type      String   // "RESERVA", "RENDA_FIXA", "RENDA_VARIAVEL"
+  amount    Float
+  month     String   // "2026-01"
+  date      DateTime?
   userId    String
   user      User     @relation(fields: [userId], references: [id])
   createdAt DateTime @default(now())
@@ -130,4 +216,35 @@ enum Source {
   BOT
   NUBANK_CSV
   CAIXA_PDF
+  PLUGGY
+}
+
+enum PaymentMethodType {
+  CARD // cartão de crédito (Nubank, Caixa...)
+  ACCOUNT // valor em conta (débito, dinheiro, Pix)
+}
+
+model PaymentMethod {
+  id        String            @id @default(uuid())
+  name      String // display name, ex: "Caixa", "Nubank", "Dinheiro"
+  type      PaymentMethodType
+  active    Boolean           @default(true)
+  userId    String
+  user      User              @relation(fields: [userId], references: [id])
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@unique([userId, name])
+}
+
+model FixedIncome {
+  id        String   @id @default(uuid())
+  name      String // ex: "Salário Jesiel", "Aluguel recebido"
+  amount    Float
+  person    Person?  // dono da renda (HUSBAND/WIFE/COUPLE)
+  active    Boolean  @default(true)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
