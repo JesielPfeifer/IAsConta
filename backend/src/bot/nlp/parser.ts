@@ -2,6 +2,8 @@ import { parseWithRegex, extractPaymentMethod, extractInstallments as extractTxI
 import { parseWithGroq, chatWithGroq } from './groq.js';
 import { callApi } from '../client.js';
 import { PrismaClient } from '@prisma/client';
+import { handleFinancialCommand } from './commands.js';
+import { setPendingState, getPendingState, clearPendingState } from './conversation.js';
 
 export type { ParsedTransaction } from './regex.js';
 
@@ -11,40 +13,76 @@ export interface ProcessResult {
 }
 
 function formatConfirmation(parsed: ParsedTransaction): string {
-  const typeLabel = parsed.transaction_type === 'expense' ? 'gasto' : 'receita';
+  const isIncome = parsed.transaction_type === 'income';
+  const typeLabel = isIncome ? 'Receita' : 'Despesa';
   const amountStr = parsed.amount != null
-    ? `R$${parsed.amount.toFixed(2).replace('.', ',')}`
+    ? `R$ ${parsed.amount.toFixed(2).replace('.', ',')}`
     : '';
 
-  let categoryStr = '';
-  if (parsed.category && parsed.category !== 'outros' && parsed.category !== 'Outros') {
-    categoryStr = ` (${parsed.category})`;
+  let msg = `✅ *Registrado!*\n\n`;
+  msg += `📌 *Tipo:* ${typeLabel}\n`;
+  msg += `💰 *Valor:* ${amountStr}\n`;
+  
+  if (parsed.description) {
+    msg += `📝 *Descrição:* ${parsed.description.charAt(0).toUpperCase() + parsed.description.slice(1)}\n`;
   }
-
-  let personStr = '';
+  
+  if (parsed.category && !/outros/i.test(parsed.category)) {
+    msg += `📂 *Categoria:* ${parsed.category}\n`;
+  }
+  
   if (parsed.is_shared) {
-    personStr = ' - casal';
+    msg += `👥 *Pessoa:* Casal\n`;
   } else if (parsed.person === 'husband') {
-    personStr = ' por marido';
+    msg += `👨 *Pessoa:* Marido\n`;
   } else if (parsed.person === 'wife') {
-    personStr = ' por esposa';
+    msg += `👩 *Pessoa:* Esposa\n`;
   }
-
-  let paymentStr = '';
+  
   if (parsed.paymentMethod) {
-    paymentStr = ` no ${parsed.paymentMethod}`;
+    const methodLabels: Record<string, string> = {
+      'NUBANK': 'Nubank 💳',
+      'CAIXA': 'Caixa 🏦',
+      'DEBITO': 'Debito 🏧',
+    };
+    msg += `💳 *Pagamento:* ${methodLabels[parsed.paymentMethod] || parsed.paymentMethod}\n`;
   }
-
-  let installmentStr = '';
+  
   if (parsed.installments && parsed.installments.total > 1) {
-    installmentStr = ` (${parsed.installments.current}/${parsed.installments.total})`;
+    msg += `🔢 *Parcela:* ${parsed.installments.current}/${parsed.installments.total}\n`;
+  }
+  
+  if (parsed.due_date) {
+    msg += `📅 *Data:* ${parsed.due_date.split('-').reverse().join('/')}\n`;
+  }
+  
+  // Ask questions for better categorization
+  msg += `\n━━━━━━━━━━━━━━\n`;
+  msg += `🤔 *Perguntas rápidas:*\n`;
+  msg += `• É uma *conta fixa*? Responda _sim_ ou _nao_\n`;
+
+  // Only ask about installments if not already detected
+  if (!parsed.installments || parsed.installments.total <= 1) {
+    msg += `• Foi *parcelado*? Responda _sim_ ou _nao_\n`;
+  } else {
+    msg += `• Parcelado em *${parsed.installments.total}x* detectado! ✓\n`;
   }
 
-  let descriptionPart = parsed.description
-    ? ` em ${parsed.description.charAt(0).toUpperCase() + parsed.description.slice(1)}`
-    : '';
+  // How to answer (clears up the follow-up flow). When installments were
+  // already detected there is only ONE question left (conta fixa) — telling
+  // the user to answer "nas duas" would confuse the follow-up state machine.
+  msg += `\n💡 *Como responder:*\n`;
+  if (parsed.installments && parsed.installments.total > 1) {
+    msg += `• Responda _sim_ ou _nao_\n`;
+    msg += `• Para cancelar: envie _nao_\n`;
+  } else {
+    msg += `• Uma por vez: _sim_ ou _nao_\n`;
+    msg += `• As duas juntas: _sim e sim_ ou _sim, nao_\n`;
+    msg += `• Se foi parcelado, mande só o número de vezes: _3_, _6_, _10_...\n`;
+    msg += `• Para cancelar: envie _nao_ nas duas`;
+  }
 
-  return `Registrei: ${typeLabel} de ${amountStr}${descriptionPart}${categoryStr}${paymentStr}${installmentStr}${personStr}`;
+  return msg;
 }
 
 // Formato da esposa: "Celular 70,00 (26/06) guardado"
@@ -175,19 +213,78 @@ export async function processMessage(
   text: string,
   platform: string,
   senderInfo?: any,
+  userId?: string,
 ): Promise<ProcessResult> {
   if (!text || text.trim().length === 0) {
     return { success: true, message: '' };
   }
 
   const prisma = new PrismaClient();
-  const botEmail = process.env.BOT_DEFAULT_EMAIL || '';
-  let botUserId = '';
-  if (botEmail) {
-    const u = await prisma.user.findUnique({ where: { email: botEmail } });
-    if (u) botUserId = u.id;
+  let botUserId = userId || '';
+  if (!botUserId) {
+    // No user linked — transactions will be skipped
+    return { success: true, message: '' };
   }
   const { getSetting } = await import('../../api/services/settings.js');
+
+  // --- FINANCIAL COMMANDS (Tier 0: explicit commands) ---
+  const cmdResult = await handleFinancialCommand(text, botUserId);
+  if (cmdResult.handled) {
+    return { success: true, message: cmdResult.message };
+  }
+
+  // --- PENDING CONVERSATION: handle "sim/nao" replies ---
+  const pending = getPendingState(senderInfo?.senderId);
+  if (pending && botUserId) {
+    const lower = text.toLowerCase().trim();
+    
+    // Parse combined answers: "sim e sim", "sim, sim", "sim e nao"
+    const answers = lower.split(/\s+(?:e|,)\s+/).map(s => s.trim());
+    
+    // Process each answer sequentially
+    for (const answer of answers) {
+      if (!pending) break;
+      
+      if (pending.question === 'fixa') {
+        if (/^(sim|s|yes|y|claro|verdade|isso|correto)$/i.test(answer)) {
+          await callApi(`/api/transactions/bot/${pending.transactionId}`, { isFixed: true }, 'PUT').catch(() => {});
+          // Move to next question
+          pending.question = 'parcelas';
+          continue;
+        } else if (/^(n[ãa]o|nao|n|nop|negativo)$/i.test(answer)) {
+          pending.question = 'parcelas';
+          continue;
+        }
+      }
+      
+      if (pending.question === 'parcelas') {
+        const numMatch = /^(\d+)$/.exec(answer);
+        if (numMatch) {
+          const total = parseInt(numMatch[1]);
+          if (total > 1 && total <= 36) {
+            await callApi(`/api/transactions/bot/${pending.transactionId}`, {
+              totalInstallments: total, currentInstallment: 1,
+            }, 'PUT').catch(() => {});
+            clearPendingState(senderInfo.senderId);
+            return { success: true, message: `✅ Marcado como *${total}x parcelado*!` };
+          }
+        }
+        if (/^(sim|s|yes|y)$/i.test(answer)) {
+          return { success: true, message: '❓ Quantas parcelas? Digite um numero (ex: 3).' };
+        }
+        if (/^(n[ãa]o|nao|n|nop|negativo)$/i.test(answer)) {
+          clearPendingState(senderInfo.senderId);
+          return { success: true, message: '👍 Ok! Pagamento a vista.' };
+        }
+      }
+    }
+    
+    // If both questions answered but no final response, confirm
+    if (pending.question === 'parcelas') {
+      return { success: true, message: '✅ Marcado como *conta fixa*!\n\n❓ Quantas parcelas? Digite um numero (ex: 3) ou _nao_ para a vista.' };
+    }
+    return { success: true, message: '' };
+  }
 
   // Comando de saldo/status/resumo
   if (/\b(saldo|status|resumo|extrato|quanto\s+resta|quanto\s+tenho|quanto\s+gastei|como\s+est(a|á)|como\s+t(a|á)|sal[aá]rio)\b/i.test(text)) {
@@ -239,7 +336,7 @@ export async function processMessage(
       // Consultas complexas: usa Groq com dados reais
       const context = `DADOS OFICIAIS (use apenas estes numeros, nao invente):\nSalario Marido: R$${husbandSalary.toFixed(2)}\nSalario Esposa: R$${wifeSalary.toFixed(2)}\nTotal Casal: R$${totalSalary.toFixed(2)}\nReceitas: R$${summary?.totalIncome?.toFixed(2) || '0'}\nDespesas: R$${summary?.totalExpense?.toFixed(2) || '0'}\nSaldo: R$${balance.toFixed(2)}\nGasto Marido: R$${husbandExpense.toFixed(2)}\nGasto Esposa: R$${wifeExpense.toFixed(2)}`;
 
-      const groqResponse = await chatWithGroq(text, context);
+      const groqResponse = await chatWithGroq(text, context, botUserId);
       if (groqResponse) {
         return { success: true, message: groqResponse };
       }
@@ -278,7 +375,7 @@ export async function processMessage(
       ]);
 
       const context = buildFinancialContext(summary, byCategory, percentage, last7Days);
-      const response = await chatWithGroq(text, context);
+      const response = await chatWithGroq(text, context, botUserId);
 
       if (response) {
         return { success: true, message: response };
@@ -313,6 +410,7 @@ export async function processMessage(
         const installments = extractInstallments(text);
 
         await callApi('/api/bills/bot', {
+          userId: botUserId,
           description: billName,
           amount: amount,
           dueDate: dueDay ? `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(dueDay).padStart(2, '0')}` : null,
@@ -364,6 +462,7 @@ export async function processMessage(
 
       try {
         await callApi('/api/transactions/bot', {
+          userId: botUserId,
           type: parsed.transaction_type,
           amount: parsed.amount,
           category: parsed.category,
@@ -407,12 +506,12 @@ export async function processMessage(
   let parsed = parseWithRegex(text);
 
   if (!parsed) {
-    parsed = await parseWithGroq(text);
+    parsed = await parseWithGroq(text, botUserId);
   }
 
   if (parsed && parsed.transaction_type === 'income' && parsed.amount !== null && parsed.amount < 100) {
     console.log(`[nlp] Regex extracted suspicious amount ${parsed.amount} for income, trying Groq...`);
-    const groqParsed = await parseWithGroq(text);
+    const groqParsed = await parseWithGroq(text, botUserId);
     if (groqParsed && groqParsed.amount !== null && groqParsed.amount > parsed.amount) {
       console.log(`[nlp] Groq corrected amount to ${groqParsed.amount}`);
       parsed = groqParsed;
@@ -421,7 +520,7 @@ export async function processMessage(
 
   if (parsed && parsed.transaction_type !== 'unknown' && parsed.amount !== null && parsed.amount < 10) {
     console.log(`[nlp] Regex extracted suspicious amount ${parsed.amount}, trying Groq...`);
-    const groqParsed = await parseWithGroq(text);
+    const groqParsed = await parseWithGroq(text, botUserId);
     if (groqParsed && groqParsed.amount !== null && groqParsed.amount > parsed.amount) {
       console.log(`[nlp] Groq corrected amount to ${groqParsed.amount}`);
       parsed = groqParsed;
@@ -440,6 +539,7 @@ export async function processMessage(
   try {
     if (parsed.transaction_type === 'reminder') {
       await callApi('/api/bills/bot', {
+        userId: botUserId,
         description: parsed.description,
         amount: parsed.amount,
         dueDate: parsed.due_date,
@@ -461,7 +561,8 @@ export async function processMessage(
       };
     }
 
-    await callApi('/api/transactions/bot', {
+    const created = await callApi<any>('/api/transactions/bot', {
+      userId: botUserId,
       type: parsed.transaction_type,
       amount: parsed.amount,
       category: parsed.category,
@@ -476,6 +577,52 @@ export async function processMessage(
       totalInstallments: parsed.installments?.total || 1,
       currentInstallment: parsed.installments?.current || 1,
     });
+
+    // Store for follow-up questions (conta fixa? parcelado?)
+    if (senderInfo?.senderId && created?.id) {
+      setPendingState(senderInfo.senderId, {
+        transactionId: created.id,
+        question: 'fixa',
+        userId: botUserId,
+        timestamp: Date.now(),
+      });
+    }
+
+    // Create future installments automatically
+    const totalParc = parsed.installments?.total || 1;
+    if (totalParc > 1 && created?.id) {
+      const groupId = created.id; // Use first transaction ID as group
+      
+      // Tag the first transaction with the group
+      await callApi(`/api/transactions/${created.id}`, {
+        installmentGroupId: groupId,
+      }, 'PUT').catch(() => {});
+      
+      const baseDate = parsed.due_date ? new Date(parsed.due_date) : new Date();
+      for (let i = 2; i <= totalParc; i++) {
+        const futureDate = new Date(baseDate);
+        futureDate.setMonth(futureDate.getMonth() + (i - 1));
+        const dateStr = futureDate.toISOString();
+        
+        await callApi('/api/transactions/bot', {
+          userId: botUserId,
+          type: parsed.transaction_type,
+          amount: parsed.amount,
+          category: parsed.category,
+          description: parsed.description,
+          person: parsed.person,
+          isShared: parsed.is_shared,
+          dueDate: dateStr,
+          platform,
+          rawMessage: text,
+          senderInfo,
+          paymentMethod: parsed.paymentMethod || null,
+          totalInstallments: totalParc,
+          currentInstallment: i,
+          installmentGroupId: groupId,
+        }).catch(() => {});
+      }
+    }
 
     return {
       success: true,
