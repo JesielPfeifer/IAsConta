@@ -8,6 +8,13 @@ interface Category {
   name: string;
 }
 
+interface PaymentMethod {
+  id: string;
+  name: string;
+  type: 'CARD' | 'ACCOUNT';
+  active: boolean;
+}
+
 interface TransactionFormData {
   amount: number;
   description: string;
@@ -56,6 +63,7 @@ function normPerson(p: string): 'HUSBAND' | 'WIFE' | 'COUPLE' {
 export default function TransactionForm({ transaction, onSave, onClose }: Props) {
   const isEditing = !!transaction;
   const [categories, setCategories] = useState<Category[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -77,6 +85,7 @@ export default function TransactionForm({ transaction, onSave, onClose }: Props)
 
   useEffect(() => {
     api('/api/categories').then((data) => setCategories(Array.isArray(data) ? data : [])).catch(() => {});
+    api('/api/payment-methods').then((data) => setPaymentMethods(Array.isArray(data) ? data : [])).catch(() => {});
   }, []);
 
   function updateField<K extends keyof TransactionFormData>(key: K, value: TransactionFormData[K]) {
@@ -96,7 +105,7 @@ export default function TransactionForm({ transaction, onSave, onClose }: Props)
     e.preventDefault();
     setError('');
     if (!form.amount || form.amount <= 0) { setError('Valor deve ser maior que zero'); return; }
-    if (!form.description.trim()) { setError('Descricao e obrigatoria'); return; }
+    if (!form.description.trim()) { setError('Descricao e obrigatória'); return; }
 
     setLoading(true);
     try {
@@ -131,14 +140,14 @@ export default function TransactionForm({ transaction, onSave, onClose }: Props)
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-400 mb-1">
-                {isExpense ? 'Valor da Despesa' : 'Valor do Credito'}
+                {isExpense ? 'Valor da Despesa' : 'Valor do Crédito'}
               </label>
               <input type="number" step="0.01" min="0.01" value={form.amount || ''} onChange={(e) => updateField('amount', parseFloat(e.target.value) || 0)} required className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50" />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-400 mb-1">Descricao</label>
+            <label className="block text-sm font-medium text-gray-400 mb-1">Descrição</label>
             <input type="text" value={form.description} onChange={(e) => updateField('description', e.target.value)} required className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50" placeholder={isExpense ? "Ex: Supermercado" : "Ex: Salario"} />
           </div>
 
@@ -170,13 +179,20 @@ export default function TransactionForm({ transaction, onSave, onClose }: Props)
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-400 mb-1">Pagamento</label>
-                  <select value={form.paymentMethod} onChange={(e) => updateField('paymentMethod', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50">
+                  <select
+                    value={form.paymentMethod}
+                    onChange={(e) => updateField('paymentMethod', e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                  >
                     <option value="">Selecione...</option>
-                    <option value="DEBITO">Debito</option>
-                    <option value="CAIXA">Caixa</option>
-                    <option value="NUBANK">Nubank</option>
-                    <option value="CREDITO_3">Credito 3</option>
-                    <option value="CREDITO_4">Credito 4</option>
+                    {paymentMethods.map((m) => (
+                      <option key={m.id} value={m.name}>{m.name}</option>
+                    ))}
+                    {/* Preserva valores legados que não estão na lista de métodos */}
+                    {form.paymentMethod &&
+                      !paymentMethods.some((m) => m.name === form.paymentMethod) && (
+                        <option value={form.paymentMethod}>{form.paymentMethod}</option>
+                      )}
                   </select>
                 </div>
                 <div>
@@ -204,10 +220,10 @@ export default function TransactionForm({ transaction, onSave, onClose }: Props)
               <select value={form.categoryId} onChange={(e) => updateField('categoryId', e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50">
                 <option value="">Selecione...</option>
                 {categories
-                  .filter(c => /salario|salário|freelance|investimento|renda|extra/i.test(c.name))
+                  .filter(c => /salário|salário|freelance|investimento|renda|extra/i.test(c.name))
                   .map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
                 {categories
-                  .filter(c => !/salario|salário|freelance|investimento|renda|extra/i.test(c.name))
+                  .filter(c => !/salário|salário|freelance|investimento|renda|extra/i.test(c.name))
                   .map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
               </select>
             </div>
