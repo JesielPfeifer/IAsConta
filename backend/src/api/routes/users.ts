@@ -1,4 +1,3 @@
-import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { PrismaClient } from "@prisma/client";
@@ -51,7 +50,7 @@ router.get("/me", async (req: Request, res: Response) => {
 
     res.json({ ...fullUser, partner });
   } catch (err) {
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -80,7 +79,7 @@ router.put("/me", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -151,7 +150,7 @@ router.get("/couple", async (req: Request, res: Response) => {
       },
     });
   } catch (err) {
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });

@@ -1,4 +1,3 @@
-import { logger } from '../lib/logger.js';
 import "dotenv/config";
 import * as readline from "node:readline/promises";
 import { PrismaClient } from "@prisma/client";
@@ -159,9 +158,9 @@ async function main() {
     user = await prisma.user.create({
       data: { email, password, name: email.split("@")[0] },
     });
-    logger.info(`Created user: ${email}`);
+    console.log(`Created user: ${email}`);
   } else {
-    logger.info(`Found existing user: ${email}`);
+    console.log(`Found existing user: ${email}`);
   }
 
   const userSettings = await prisma.userSettings.findUnique({ where: { userId: user.id } });
@@ -193,11 +192,11 @@ async function main() {
 
   for (const [sheetName, sheetMonth] of Object.entries(MONTH_SHEETS)) {
     if (!workbook.SheetNames.includes(sheetName)) {
-      logger.info(`  Sheet "${sheetName}" not found, skipping.`);
+      console.log(`  Sheet "${sheetName}" not found, skipping.`);
       continue;
     }
 
-    logger.info(`\n--- ${sheetName} ---`);
+    console.log(`\n--- ${sheetName} ---`);
 
     const sheet = workbook.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, dateNF: "DD/MM/YYYY" }) as unknown[][];
@@ -441,10 +440,10 @@ async function main() {
         });
         billCount++;
       } catch (err) {
-        logger.error(`  Error inserting bill "${bill.name}" (${bill.amount}):`, (err as Error).message);
+        console.error(`  Error inserting bill "${bill.name}" (${bill.amount}):`, (err as Error).message);
       }
     }
-    logger.info(`  Bills: ${billCount} imported`);
+    console.log(`  Bills: ${billCount} imported`);
 
     // ===============================================================
     // PERSIST: Cartão + Gastos (EXPENSE Transactions)
@@ -485,10 +484,10 @@ async function main() {
         });
         expenseCount++;
       } catch (err) {
-        logger.error(`  Error inserting expense "${tx.description}" (${tx.amount}):`, (err as Error).message);
+        console.error(`  Error inserting expense "${tx.description}" (${tx.amount}):`, (err as Error).message);
       }
     }
-    logger.info(`  Expenses: ${expenseCount} imported`);
+    console.log(`  Expenses: ${expenseCount} imported`);
 
     // ===============================================================
     // PERSIST: Entradas (INCOME Transactions)
@@ -535,22 +534,22 @@ async function main() {
         });
         incomeCount++;
       } catch (err) {
-        logger.error(`  Error inserting income "${tx.description}" (${tx.amount}):`, (err as Error).message);
+        console.error(`  Error inserting income "${tx.description}" (${tx.amount}):`, (err as Error).message);
       }
     }
-    logger.info(`  Income: ${incomeCount} imported`);
+    console.log(`  Income: ${incomeCount} imported`);
 
     totalBills += billCount;
     totalExpenses += expenseCount;
     totalIncome += incomeCount;
   }
 
-  logger.info(`\n========================================`);
-  logger.info(`Done! Import summary for ${email}:`);
-  logger.info(`  Bills:    ${totalBills}`);
-  logger.info(`  Expenses: ${totalExpenses}`);
-  logger.info(`  Income:   ${totalIncome}`);
-  logger.info(`  Total:    ${totalBills + totalExpenses + totalIncome}`);
+  console.log(`\n========================================`);
+  console.log(`Done! Import summary for ${email}:`);
+  console.log(`  Bills:    ${totalBills}`);
+  console.log(`  Expenses: ${totalExpenses}`);
+  console.log(`  Income:   ${totalIncome}`);
+  console.log(`  Total:    ${totalBills + totalExpenses + totalIncome}`);
 }
 
 main()
