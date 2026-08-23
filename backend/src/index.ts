@@ -174,13 +174,18 @@ app.post("/webhook/evolution", async (req, res) => {
     }
     const { getSetting } = await import('./api/services/settings.js');
     const allowedGroup = await getSetting(botUserId, 'whatsappGroupId', process.env.WHATSAPP_GROUP_ID || '');
-    if (isGroup && allowedGroup && senderId !== allowedGroup) {
-      res.sendStatus(200);
-      return;
-    }
-
-    if (!isGroup && !allowedGroup) {
+    // Filtro de segurança de grupo: o bot SÓ deve processar/responder em grupo
+    // quando um grupo autorizado (whatsappGroupId) estiver explicitamente
+    // configurado E a mensagem vier desse grupo. Sem configuração, grupos são
+    // ignorados por padrão para evitar vazamento de dados financeiros.
+    if (isGroup) {
+      if (!allowedGroup || senderId !== allowedGroup) {
+        res.sendStatus(200);
+        return;
+      }
     } else if (!isGroup && allowedGroup) {
+      // Mensagem privada enquanto um grupo está autorizado: ignora (o bot
+      // opera apenas no grupo autorizado).
       res.sendStatus(200);
       return;
     }
