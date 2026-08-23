@@ -1,3 +1,4 @@
+import { logger } from '../../lib/logger.js';
 import { Resend } from "resend";
 
 const resend = new Resend(process.env.RESEND_API_KEY || "re_xxx");
@@ -16,7 +17,7 @@ export async function sendWelcome(
       html: `<p>Olá ${userName},</p><p>Sua conta no <strong>Contas</strong> foi criada com sucesso.</p><p>Comece a registrar suas transações e organize suas finanças!</p>`,
     });
   } catch (err) {
-    console.error("Erro ao enviar email de boas-vindas:", err);
+    logger.error("Erro ao enviar email de boas-vindas:", err);
   }
 }
 
@@ -32,7 +33,7 @@ export async function sendPasswordReset(
       html: `<p>Você solicitou a redefinição de senha.</p><p>Use o token abaixo:</p><pre>${token}</pre><p>Se você não solicitou isso, ignore este email.</p>`,
     });
   } catch (err) {
-    console.error("Erro ao enviar email de redefinição:", err);
+    logger.error("Erro ao enviar email de redefinição:", err);
   }
 }
 
@@ -49,6 +50,6 @@ export async function sendPartnerInvite(
       html: `<p>Olá,</p><p>${inviterName} te convidou para gerenciar as finanças do casal no <strong>Contas</strong>.</p><p>Use o token abaixo ao se cadastrar:</p><pre>${token}</pre>`,
     });
   } catch (err) {
-    console.error("Erro ao enviar convite de parceiro:", err);
+    logger.error("Erro ao enviar convite de parceiro:", err);
   }
 }

@@ -1,3 +1,4 @@
+import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { PrismaClient } from "@prisma/client";
@@ -47,7 +48,7 @@ router.get("/", async (req: Request, res: Response) => {
 
     res.json(bills);
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -75,7 +76,7 @@ router.post("/", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -111,7 +112,7 @@ router.put("/:id", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -134,7 +135,7 @@ router.delete("/:id", async (req: Request, res: Response) => {
 
     res.json({ message: "Conta removida" });
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -155,6 +156,22 @@ const botBillSchema = z.object({
   currentInstallment: z.number().int().min(1).optional(),
 });
 
+async function getBotUserId(req: Request): Promise<string> {
+  if (req.body?.userId) {
+    const linked = await prisma.whatsAppUser.findFirst({
+      where: { userId: req.body.userId, isActive: true },
+    });
+    if (linked) return linked.userId;
+  }
+  const wa = await prisma.whatsAppUser.findFirst({
+    where: { isActive: true },
+    orderBy: { createdAt: "asc" },
+  });
+  if (wa) return wa.userId;
+  const first = await prisma.user.findFirst({ orderBy: { createdAt: "asc" } });
+  return first?.id || '';
+}
+
 const botRouter = Router();
 botRouter.use(botAuthMiddleware);
 
@@ -162,18 +179,11 @@ botRouter.post("/", async (req: Request, res: Response) => {
   try {
     const data = botBillSchema.parse(req.body);
 
-    if (!BOT_DEFAULT_EMAIL) {
-      res.status(400).json({ error: "BOT_DEFAULT_EMAIL not configured" });
+    const userId = await getBotUserId(req);
+    if (!userId) {
+      res.status(400).json({ error: "No user found. Link a WhatsApp number first." });
       return;
     }
-
-    const user = await prisma.user.findUnique({ where: { email: BOT_DEFAULT_EMAIL } });
-    if (!user) {
-      res.status(404).json({ error: "Usuário padrão do bot não encontrado. Verifique BOT_DEFAULT_EMAIL no .env" });
-      return;
-    }
-
-    const userId = user.id;
 
     const dueDate = data.dueDate
       ? new Date(data.dueDate)
@@ -224,7 +234,7 @@ botRouter.post("/", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });

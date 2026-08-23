@@ -1,3 +1,4 @@
+import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { PrismaClient } from "@prisma/client";
@@ -36,7 +37,7 @@ router.get("/", async (req: Request, res: Response) => {
 
     res.json(budgets);
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -62,7 +63,7 @@ router.post("/", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -94,7 +95,7 @@ router.put("/:id", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -117,7 +118,7 @@ router.delete("/:id", async (req: Request, res: Response) => {
 
     res.json({ message: "Orçamento removido" });
   } catch (err) {
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });

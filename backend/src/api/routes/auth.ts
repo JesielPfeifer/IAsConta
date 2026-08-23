@@ -1,3 +1,4 @@
+import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
@@ -6,9 +7,15 @@ import { PrismaClient } from "@prisma/client";
 import { authMiddleware } from "../middleware/auth.js";
 import { sendPasswordReset, sendPartnerInvite } from "../services/email.js";
 
+import { checkAccountLock, recordFailedAttempt, resetFailedAttempts } from "../middleware/security.js";
+
 const router = Router();
 const prisma = new PrismaClient();
-const JWT_SECRET = process.env.JWT_SECRET || "change-me-to-a-random-secret";
+const JWT_SECRET = process.env.JWT_SECRET as string;
+if (!JWT_SECRET) {
+  logger.error("[FATAL] JWT_SECRET env var is required");
+  process.exit(1);
+}
 
 const DEFAULT_CATEGORIES = [
   "Alimentação",
@@ -165,7 +172,7 @@ router.post("/register", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -173,6 +180,13 @@ router.post("/register", async (req: Request, res: Response) => {
 router.post("/login", async (req: Request, res: Response) => {
   try {
     const data = loginSchema.parse(req.body);
+
+    // Check account lockout
+    const lockCheck = await checkAccountLock(data.email);
+    if (lockCheck.locked) {
+      res.status(423).json({ error: lockCheck.message });
+      return;
+    }
 
     const user = await prisma.user.findUnique({ where: { email: data.email } });
     if (!user) {
@@ -182,9 +196,19 @@ router.post("/login", async (req: Request, res: Response) => {
 
     const valid = await bcrypt.compare(data.password, user.password);
     if (!valid) {
-      res.status(401).json({ error: "Email ou senha inválidos" });
+      const locked = await recordFailedAttempt(data.email);
+      if (locked) {
+        res.status(423).json({ error: "Conta bloqueada por 15 minutos após 5 tentativas." });
+      } else {
+        const check = await checkAccountLock(data.email);
+        res.status(401).json({
+          error: `Email ou senha inválidos. ${check.remainingAttempts} tentativa(s) restante(s).`,
+        });
+      }
       return;
     }
+
+    await resetFailedAttempts(data.email);
 
     const token = generateToken({
       id: user.id,
@@ -200,7 +224,7 @@ router.post("/login", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -229,7 +253,7 @@ router.post("/forgot-password", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -264,7 +288,7 @@ router.post("/reset-password", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
-    console.error(err);
+    logger.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -296,7 +320,7 @@ router.post(
         res.status(400).json({ error: "Dados inválidos", details: err.errors });
         return;
       }
-      console.error(err);
+      logger.error(err);
       res.status(500).json({ error: "Erro interno" });
     }
   }
