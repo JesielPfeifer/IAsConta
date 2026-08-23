@@ -129,8 +129,9 @@ router.get("/card-cycle", async (req: Request, res: Response) => {
         pluggyAccountId: txs[0]?.pluggyAccountId ?? null,
         paymentMethod,
         invoiceDay: null,
-        // Ciclo de dia de fechamento removido: o mês da fatura vem do Pluggy
-        // (billForecastMonth). Mantém os campos nulos para não quebrar o front.
+        // Mês da fatura informado pelo Pluggy (billForecastMonth = "YYYY-MM").
+        // Substitui o ciclo de dia de fechamento (removido).
+        invoiceMonth: month,
         start: null,
         end: null,
         total: Math.round(total * 100) / 100,
