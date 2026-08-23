@@ -1,6 +1,11 @@
+import { logger } from '../../lib/logger.js';
 import { Request, Response, NextFunction } from "express";
 
-const BOT_API_KEY = process.env.BOT_API_KEY || "change-me-bot-key";
+const BOT_API_KEY = process.env.BOT_API_KEY;
+if (!BOT_API_KEY) {
+  logger.error("[FATAL] BOT_API_KEY env var is required");
+  process.exit(1);
+}
 
 export function botAuthMiddleware(
   req: Request,
@@ -10,7 +15,7 @@ export function botAuthMiddleware(
   const apiKey = req.headers["x-bot-api-key"] as string | undefined;
 
   if (!apiKey || apiKey !== BOT_API_KEY) {
-    res.status(401).json({ error: "Bot API key inválida" });
+    res.status(401).json({ error: "Bot API key invalida" });
     return;
   }
 

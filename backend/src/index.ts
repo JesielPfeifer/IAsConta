@@ -1,19 +1,29 @@
+import { logger } from './lib/logger.js';
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import multer from "multer";
 import { PrismaClient } from "@prisma/client";
+import { rateLimitMiddleware, corsOptions } from "./api/middleware/security.js";
 import authRoutes from "./api/routes/auth.js";
 import transactionRoutes, { botRouter } from "./api/routes/transactions.js";
 import categoryRoutes from "./api/routes/categories.js";
 import billRoutes, { botRouter as billBotRouter } from "./api/routes/bills.js";
 import budgetRoutes from "./api/routes/budgets.js";
+import goalRoutes from "./api/routes/goals.js";
+import investmentRoutes from "./api/routes/investments.js";
 import dashboardRoutes from "./api/routes/dashboard.js";
 import botDashboardRoutes from "./api/routes/botDashboard.js";
 import userRoutes from "./api/routes/users.js";
 import chatRoutes from "./api/routes/chat.js";
 import whatsappRoutes from "./api/routes/whatsapp.js";
+import whatsappUserRoutes from "./api/routes/whatsapp-users.js";
+import paymentMethodRoutes from "./api/routes/payment-methods.js";
+import fixedIncomeRoutes from "./api/routes/fixed-incomes.js";
+import pluggyRoutes from "./api/routes/pluggy.js";
 import settingsRoutes from "./api/routes/settings.js";
+import cardsRoutes from "./api/routes/cards.js";
+import annualRoutes from "./api/routes/annual.js";
 import { startWhatsApp, sendMessage } from "./bot/platforms/whatsapp.js";
 import { startDiscord } from "./bot/platforms/discord.js";
 import { startTelegram } from "./bot/platforms/telegram.js";
@@ -23,11 +33,53 @@ import { parseCaixaPDF } from "./parsers/caixa-pdf.js";
 import { callApi } from "./bot/client.js";
 
 const app = express();
+app.set("trust proxy", 1);
+
+// Request logging (arquivo diario) - metodo, rota, status e duracao
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on("finish", () => {
+    const route = req.originalUrl.split("?")[0];
+    if (route.startsWith("/api") || route.startsWith("/webhook")) {
+      logger.http("request", {
+        method: req.method,
+        path: route,
+        status: res.statusCode,
+        ms: Date.now() - start,
+        ip: req.headers["x-forwarded-for"] || req.ip,
+      });
+    }
+  });
+  next();
+});
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
-app.use(cors());
-app.use(express.json({ limit: "5mb" }));
+// ---------------------------------------------------------------------------
+// Webhook secrets são OBRIGATÓRIOS e NÃO têm fallback: se EVOLUTION_WEBHOOK_SECRET
+// ou PLUGGY_WEBHOOK_SECRET não estiverem definidos, o servidor NÃO sobe.
+// Um secret ausente significa webhook sem validação (requisições forjadas
+// aceitas) — melhor quebrar o startup do que aceitar isso silenciosamente.
+// ---------------------------------------------------------------------------
+function assertRequiredSecrets(): void {
+  const required: Array<[string, string | undefined]> = [
+    ["EVOLUTION_WEBHOOK_SECRET", process.env.EVOLUTION_WEBHOOK_SECRET],
+    ["PLUGGY_WEBHOOK_SECRET", process.env.PLUGGY_WEBHOOK_SECRET],
+  ];
+  for (const [name, value] of required) {
+    if (!value) {
+      logger.error(`[config] FATAL: ${name} não configurado — defina no .env (sem fallback, o servidor não inicia).`);
+      process.exit(1);
+    }
+  }
+}
+assertRequiredSecrets();
+
+app.use(cors(corsOptions()));
+app.use(express.json({ limit: "1mb" }));
+
+// Rate limit: auth routes only
+app.use("/api/auth", rateLimitMiddleware);
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
@@ -40,12 +92,20 @@ app.use("/api/categories", categoryRoutes);
 app.use("/api/bills/bot", billBotRouter);
 app.use("/api/bills", billRoutes);
 app.use("/api/budgets", budgetRoutes);
+app.use("/api/goals", goalRoutes);
+app.use("/api/investments", investmentRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/bot/dashboard", botDashboardRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/whatsapp", whatsappRoutes);
+app.use("/api/whatsapp-users", whatsappUserRoutes);
+app.use("/api/payment-methods", paymentMethodRoutes);
+app.use("/api/fixed-incomes", fixedIncomeRoutes);
+app.use("/api/pluggy", pluggyRoutes);
 app.use("/api/settings", settingsRoutes);
+app.use("/api/cards", cardsRoutes);
+app.use("/api/annual", annualRoutes);
 
 app.post("/api/parse/nubank", upload.single("file"), async (req, res) => {
   try {
@@ -75,6 +135,22 @@ app.post("/api/parse/caixa", upload.single("file"), async (req, res) => {
 
 app.post("/webhook/evolution", async (req, res) => {
   try {
+    // Validate webhook secret — fail if not configured. Dedicated secret,
+    // NO fallback: a leak in the Pluggy integration cannot forge Evolution
+    // webhooks, and a missing secret stops the server at startup.
+    const expectedSecret = process.env.EVOLUTION_WEBHOOK_SECRET;
+    if (!expectedSecret) {
+      logger.error("[webhook] FATAL: EVOLUTION_WEBHOOK_SECRET not configured");
+      res.status(500).json({ error: "Server misconfiguration" });
+      return;
+    }
+    const webhookSecret = req.headers["x-webhook-secret"] as string;
+    if (webhookSecret !== expectedSecret) {
+      logger.warn(`[webhook] Invalid webhook secret, rejecting. received=${JSON.stringify(webhookSecret)}`);
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
     const body = req.body;
     const data = body?.data;
     if (!data) { res.sendStatus(200); return; }
@@ -96,12 +172,24 @@ app.post("/webhook/evolution", async (req, res) => {
 
     const text = rawText.replace(/@contas/gi, "").trim();
 
+    // Identify user by instance name from webhook
     const prisma = new PrismaClient();
-    const botEmail = process.env.BOT_DEFAULT_EMAIL || '';
     let botUserId = '';
-    if (botEmail) {
-      const u = await prisma.user.findUnique({ where: { email: botEmail } });
-      if (u) botUserId = u.id;
+    
+    try {
+      const waUser = await prisma.whatsAppUser.findFirst({
+        where: { instanceName, isActive: true },
+      });
+      if (waUser) {
+        botUserId = waUser.userId;
+      }
+      
+      if (!botUserId) {
+        res.sendStatus(200);
+        return;
+      }
+    } finally {
+      await prisma.$disconnect();
     }
     const { getSetting } = await import('./api/services/settings.js');
     const allowedGroup = await getSetting(botUserId, 'whatsappGroupId', process.env.WHATSAPP_GROUP_ID || '');
@@ -117,7 +205,7 @@ app.post("/webhook/evolution", async (req, res) => {
     }
 
     if (text && text.trim().length > 0) {
-      const result = await processMessage(text, "whatsapp", { senderId, senderName, instanceName, isGroup });
+      const result = await processMessage(text, "whatsapp", { senderId, senderName, instanceName, isGroup }, botUserId);
       if (result.message) {
         await sendMessage(instanceName, senderId, result.message);
       }
@@ -205,7 +293,7 @@ app.post("/webhook/evolution", async (req, res) => {
                     });
                     imported++;
                   } catch (e) {
-                    console.error("[webhook] Failed to import CSV tx:", e);
+                    logger.error("[webhook] Failed to import CSV tx:", e);
                   }
                 }
                 await sendMessage(instanceName, senderId, `Nubank CSV processado: ${imported} transacoes importadas de ${parsed.transactions.length} encontradas.`);
@@ -233,7 +321,7 @@ app.post("/webhook/evolution", async (req, res) => {
                     });
                     imported++;
                   } catch (e) {
-                    console.error("[webhook] Failed to import PDF tx:", e);
+                    logger.error("[webhook] Failed to import PDF tx:", e);
                   }
                 }
                 const periodStr = parsed.metadata?.period || "periodo nao identificado";
@@ -249,7 +337,7 @@ app.post("/webhook/evolution", async (req, res) => {
             await sendMessage(instanceName, senderId, "Nao foi possivel baixar o arquivo. Tente enviar novamente ou use o painel web para importar.");
           }
         } catch (err) {
-          console.error("[webhook] File processing error:", err);
+          logger.error("[webhook] File processing error:", err);
           await sendMessage(instanceName, senderId, "Erro ao processar o arquivo enviado.");
         }
       }
@@ -260,26 +348,26 @@ app.post("/webhook/evolution", async (req, res) => {
 
     res.sendStatus(200);
   } catch (err) {
-    console.error("[webhook] Error:", err);
+    logger.error("[webhook] Error:", err);
     res.sendStatus(200);
   }
 });
 
 app.use(
   (err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-    console.error("Unhandled error:", err);
+    logger.error("Unhandled error:", err);
     res.status(500).json({ error: "Erro interno do servidor" });
   }
 );
 
 app.listen(PORT, async () => {
-  console.log(`Backend running on http://localhost:${PORT}`);
+  logger.info(`Backend running on http://localhost:${PORT}`);
   try {
     await startWhatsApp();
     await startDiscord();
     await startTelegram();
   } catch (err) {
-    console.error("[bot] Init error:", err);
+    logger.error("[bot] Init error:", err);
   }
 });
 

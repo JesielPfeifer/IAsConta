@@ -1,3 +1,4 @@
+import { logger } from '../../lib/logger.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const apiKey = process.env.GEMINI_API_KEY || '';
@@ -60,7 +61,7 @@ function normalizeParsed(raw: any): ParsedTransaction {
 
 export async function parseWithGemini(text: string): Promise<ParsedTransaction | null> {
   if (!apiKey) {
-    console.warn('[nlp] GEMINI_API_KEY not set, skipping Gemini parse');
+    logger.warn('[nlp] GEMINI_API_KEY not set, skipping Gemini parse');
     return null;
   }
 
@@ -77,14 +78,14 @@ export async function parseWithGemini(text: string): Promise<ParsedTransaction |
 
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      console.warn('[nlp] Gemini did not return valid JSON:', responseText);
+      logger.warn('[nlp] Gemini did not return valid JSON:', responseText);
       return null;
     }
 
     const parsed = JSON.parse(jsonMatch[0]);
     return normalizeParsed(parsed);
   } catch (err) {
-    console.error('[nlp] Gemini parse error:', err);
+    logger.error('[nlp] Gemini parse error:', err);
     return null;
   }
 }
