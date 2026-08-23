@@ -114,20 +114,39 @@ async function cardTransactionWhere(userId: string, start: Date, end: Date) {
     "doc enviado",
     "doc recebido",
   ].map((s) => ({ NOT: { description: { contains: s, mode: "insensitive" as const } } }));
-  // Filtra pela DATA DA COMPRA (mês civil), igual à lista de transações.
-  // O billForecastMonth (mês da fatura informado pelo Pluggy) NÃO é usado
-  // como critério de filtro, para que uma compra de 18/08 apareça em Agosto
-  // e não "pule" para Setembro só porque a fatura do banco é do mês seguinte.
-  const invoiceFilter = { date: { gte: start, lt: end } };
+  // Filtra pela FATURA (mês correto da fatura), não pela data da compra.
+  // billForecastMonth é String "YYYY-MM" informada pelo Pluggy (mês em que a
+  // fatura fecha). Ex.: compra de 18/08 com billForecastMonth="2026-09" deve
+  // aparecer em Setembro no card de cartão, não em Agosto. Compras manuais/
+  // legado sem billForecastMonth definido caem no mês da data da compra.
+  const monthKey = `${start.getUTCFullYear()}-${String(start.getUTCMonth() + 1).padStart(2, "0")}`;
+  const invoiceFilter = {
+    OR: [
+      { billForecastMonth: monthKey },
+      { billForecastMonth: null, date: { gte: start, lt: end } },
+    ],
+  };
   return {
     userId,
     type: "EXPENSE" as const,
-    ...invoiceFilter,
-    AND: notTransfer,
-    OR: [
-      { isCreditCard: true },
-      // Legacy rows: payment method configured as CARD by the user
-      { paymentMethod: { in: cardMethods.map((m) => m.name) } },
+    AND: [
+      ...notTransfer,
+      // Filtro pela FATURA (mês correto): billForecastMonth = mês filtrado,
+      // ou (sem fatura definida) a data da compra no mês.
+      {
+        OR: [
+          { billForecastMonth: monthKey },
+          { billForecastMonth: null, date: { gte: start, lt: end } },
+        ],
+      },
+      // Apenas compras de cartão de crédito.
+      {
+        OR: [
+          { isCreditCard: true },
+          // Legacy rows: payment method configured as CARD by the user
+          { paymentMethod: { in: cardMethods.map((m) => m.name) } },
+        ],
+      },
     ],
   };
 }
