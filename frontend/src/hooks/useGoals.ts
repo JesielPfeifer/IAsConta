@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api/client';
+import { useAutoRefresh } from './useAutoRefresh';
 
 export interface GoalMonth {
   id: string;
@@ -32,9 +33,7 @@ export function useGoals() {
     }
   }, []);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  useAutoRefresh(refresh, []);
 
   const create = async (data: { name: string; totalAmount: number; targetDate?: string | null }) => {
     await api('/api/goals', {

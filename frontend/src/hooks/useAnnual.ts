@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api/client';
+import { useAutoRefresh } from './useAutoRefresh';
 
 export interface MonthData {
   month: string;
@@ -39,9 +40,7 @@ export function useAnnual(year?: number) {
     }
   }, [year]);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  useAutoRefresh(refresh, [year]);
 
   return { data, loading, refresh };
 }

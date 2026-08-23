@@ -10,7 +10,7 @@ interface ChatMessage {
 export default function ChatBot() {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: 'assistant', content: 'Ola! Sou seu assistente financeiro com Groq AI. Pergunte sobre suas contas, saldo, gastos ou peca ajuda para organizar suas financas!' },
+    { role: 'assistant', content: 'Olá! Sou seu assistente financeiro com Groq AI. Pergunte sobre suas contas, saldo, gastos ou peça ajuda para organizar suas finanças!' },
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -42,7 +42,7 @@ export default function ChatBot() {
 
       setMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
     } catch {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Erro ao conectar com o assistente. Verifique sua conexao e tente novamente.' }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Erro ao conectar com o assistente. Verifique sua conexão e tente novamente.' }]);
     } finally {
       setLoading(false);
     }
@@ -60,14 +60,14 @@ export default function ChatBot() {
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full shadow-lg flex items-center justify-center transition-all hover:scale-110"
+          className="chatbot-fab fixed bottom-6 right-6 z-50 w-14 h-14 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full shadow-lg flex items-center justify-center transition-all hover:scale-110"
         >
           <MessageCircle className="w-6 h-6" />
         </button>
       )}
 
       {open && (
-        <div className="fixed bottom-6 right-6 z-50 w-96 h-[560px] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl flex flex-col">
+        <div className="chatbot-panel fixed bottom-6 right-6 z-50 w-96 h-[560px] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl flex flex-col">
           <div className="flex items-center justify-between p-4 border-b border-gray-700">
             <div className="flex items-center gap-2">
               <Bot className="w-5 h-5 text-emerald-400" />

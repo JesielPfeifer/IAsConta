@@ -1,9 +1,9 @@
-import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import dayjs from "dayjs";
 import { authMiddleware } from "../middleware/auth.js";
 import { getSetting } from "../services/settings.js";
+import { logger } from "../../lib/logger.js";
 
 const router = Router();
 const prisma = new PrismaClient();

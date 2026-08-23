@@ -1,6 +1,54 @@
 @import "tailwindcss";
 
+/* ===== Mobile UX global ===== */
+
+/* Evita zoom automático do iOS ao focar inputs */
+@media (max-width: 767px) {
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Touch targets confortáveis em mobile */
+@media (max-width: 767px) {
+  button, [role="button"], a {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* Safe area (iPhone com notch/barra inferior) */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.mb-safe {
+  margin-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Botão de chat flutuante: não cobrir conteúdo em mobile */
+@media (max-width: 767px) {
+  .chatbot-fab {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 12px) !important;
+    right: 12px !important;
+  }
+  .chatbot-panel {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    border-radius: 0 !important;
+  }
+}
+
+/* Scroll suave */
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Garante legibilidade dos <option> nos dropdowns nativos (fundo escuro +
+   texto branco). Sem isso, em alguns navegadores o option herda o fundo
+   claro do select e o texto branco fica invisível. */
 select option {
-  background-color: #1f2937;
+  background-color: #1f2937; /* gray-800 */
   color: #ffffff;
 }

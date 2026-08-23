@@ -107,13 +107,13 @@ export default function FileImport({ onClose, onSuccess }: Props) {
       });
 
       if (!result.success && result.transactions.length === 0) {
-        setError(result.errors?.join('; ') || 'Formato nao reconhecido');
+        setError(result.errors?.join('; ') || 'Formato não reconhecido');
         setUploading(false);
         return;
       }
 
       if (!result.transactions || result.transactions.length === 0) {
-        setError('Nenhuma transacao encontrada no arquivo.');
+        setError('Nenhuma transação encontrada no arquivo.');
         setUploading(false);
         return;
       }

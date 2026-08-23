@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api/client';
+import { useAutoRefresh } from './useAutoRefresh';
 
 export interface Investment {
   id: string;
@@ -54,9 +55,7 @@ export function useInvestments(month?: string) {
     }
   }, [month]);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  useAutoRefresh(refresh, [month]);
 
   const create = async (invData: { type: string; amount: number; month: string; date?: string }) => {
     await api('/api/investments', {

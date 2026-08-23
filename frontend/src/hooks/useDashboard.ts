@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api/client';
+import { useAutoRefresh } from './useAutoRefresh';
 
 interface Summary {
   totalIncome: number;
@@ -97,9 +98,7 @@ export function useDashboard(month?: string) {
     }
   }, [month]);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  useAutoRefresh(refresh, [month]);
 
   return { ...data, comparison, yearAnalysis, tip, loading, refresh };
 }

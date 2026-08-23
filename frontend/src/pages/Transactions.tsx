@@ -1,10 +1,11 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useTransactions, type Transaction } from '../hooks/useTransactions';
 import TransactionForm from '../components/TransactionForm';
 import FileImport from '../components/FileImport';
 import ConfirmModal from '../components/ConfirmModal';
-import { api } from '../api/client';
-import { Plus, Upload, Pencil, Trash2, Search, Check, X, ChevronDown, Calendar, Filter, Users, type LucideIcon } from 'lucide-react';
+import { api, DATA_CHANGED_EVENT } from '../api/client';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
+import { Plus, Upload, Pencil, Trash2, Search, Check, X, ChevronDown, Calendar, Filter, Users, CreditCard, ArrowUpDown, type LucideIcon } from 'lucide-react';
 import dayjs from 'dayjs';
 
 function formatCurrency(value: number) {
@@ -78,6 +79,11 @@ export default function Transactions() {
   const [deleteTarget, setDeleteTarget] = useState<string | string[] | null>(null);
   const [editingAmount, setEditingAmount] = useState<{ id: string; value: string } | null>(null);
 
+  const [groupFilter, setGroupFilter] = useState<string | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set([]));
+  const [cardCycles, setCardCycles] = useState<any[]>([]);
+
+
   const filtered = useMemo(() => {
     if (!search) return transactions;
     const q = search.toLowerCase();
@@ -86,6 +92,56 @@ export default function Transactions() {
       (t.categoryName || '').toLowerCase().includes(q)
     );
   }, [transactions, search]);
+
+  // ── Agrupadores: cartões/contas (Pluggy) + formas de pagamento (débito) + casal ──
+  const grouped = useMemo(() => {
+    const cartões: Record<string, { total: number; count: number }> = {};
+    const formas: Record<string, { total: number; count: number }> = {};
+    for (const t of filtered) {
+      if (t.type !== 'EXPENSE') continue;
+      if (t.isCreditCard) {
+        const k = t.paymentMethod || 'Cartao';
+        cartões[k] = cartões[k] || { total: 0, count: 0 };
+        cartões[k].total += Math.abs(t.amount);
+        cartões[k].count += 1;
+      } else {
+        const k = t.paymentMethod ? t.paymentMethod.toUpperCase() : 'DINHEIRO';
+        formas[k] = formas[k] || { total: 0, count: 0 };
+        formas[k].total += Math.abs(t.amount);
+        formas[k].count += 1;
+      }
+    }
+    const desc = (t: Transaction) => (t.description || '').toLowerCase();
+    const ehTransferencia = (t: Transaction) => /transfer|pix|ted/.test(desc(t));
+    const ehCasal = (t: Transaction) => /eduarda|jesiel/.test(desc(t)) || t.person === 'WIFE';
+    const casal = filtered.filter((t) => t.type === 'EXPENSE' && ehTransferencia(t) && ehCasal(t));
+    return {
+      cartões: Object.entries(cartões).sort((a, b) => b[1].total - a[1].total),
+      formas: Object.entries(formas).sort((a, b) => b[1].total - a[1].total),
+      casal,
+    };
+  }, [filtered]);
+
+  const groupTxs = (key: string): Transaction[] => {
+    if (!filtered.length) return [];
+    if (key.startsWith('cc-')) {
+      const id = key.slice(3);
+      const found = cardCycles.find((cc) => (cc.id || cc.paymentMethod || '') === id);
+      const listCC: any[] = found ? (found.txs || []) : [];
+      return listCC.slice().sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }
+    if (key.startsWith('fp-')) {
+      const name = key.slice(3);
+      const list = filtered.filter((t) => t.type === 'EXPENSE' && !t.isCreditCard && (t.paymentMethod ? t.paymentMethod.toUpperCase() : 'DINHEIRO') === name);
+      return list.slice().sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }
+    return [];
+  };
+
+  const visibleRows = useMemo(() => {
+    if (!groupFilter) return filtered;
+    return filtered.filter((t) => groupTxs(groupFilter).some((g) => g.id === t.id));
+  }, [filtered, groupFilter]);
 
   function handleEdit(tx: Transaction) {
     setEditing(tx);
@@ -107,7 +163,11 @@ export default function Transactions() {
     if (!deleteTarget) return;
     const ids = Array.isArray(deleteTarget) ? deleteTarget : [deleteTarget];
     for (const id of ids) {
-      await remove(id);
+      try {
+        await remove(id);
+      } catch {
+        // ignora erro de item individual (ex.: já removido em cascata)
+      }
     }
     setDeleteTarget(null);
     setSelected(new Set());
@@ -126,7 +186,7 @@ export default function Transactions() {
     if (selected.size === filtered.length) {
       setSelected(new Set());
     } else {
-      setSelected(new Set(filtered.map(t => t.id)));
+      setSelected(new Set(visibleRows.map(t => t.id)));
     }
   }
 
@@ -145,8 +205,8 @@ export default function Transactions() {
   }
 
   const deleteMessage = Array.isArray(deleteTarget) && deleteTarget.length > 1
-    ? `Deseja excluir ${deleteTarget.length} transacoes selecionadas?`
-    : 'Deseja excluir esta transacao?';
+    ? `Deseja excluir ${deleteTarget.length} transações selecionadas?`
+    : 'Deseja excluir esta transação?';
 
   const typeOptions = [
     { value: '', label: 'Todos os tipos' },
@@ -169,6 +229,17 @@ export default function Transactions() {
       .catch(() => {});
   }, []);
 
+  const fetchCardCycles = useCallback(async () => {
+    try {
+      const data = await api(`/api/transactions/card-cycle?month=${month}`);
+      setCardCycles(Array.isArray(data) ? data : []);
+    } catch {
+      setCardCycles([]);
+    }
+  }, [month]);
+
+  useAutoRefresh(fetchCardCycles, [month]);
+
   const paymentOptions = useMemo(() => [
     { value: '', label: 'Todos os pagamentos' },
     ...paymentMethods.map((m) => ({
@@ -179,9 +250,10 @@ export default function Transactions() {
 
   return (
     <div className="space-y-6">
+      <style>{`@keyframes dropExpand { from { opacity: 0; transform: translateY(-12px) translateX(-7px); } to { opacity: 1; transform: translateY(0px) translateX(0px); } }`}</style>
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Transacoes</h1>
+          <h1 className="text-2xl font-bold text-white tracking-tight">Transações</h1>
           <p className="text-sm text-gray-500 mt-0.5">Gerencie suas receitas e despesas</p>
         </div>
         <div className="flex gap-2">
@@ -258,96 +330,286 @@ export default function Transactions() {
         </div>
       </div>
 
-      <div className="relative bg-gray-900/50 border border-white/5 rounded-2xl overflow-hidden">
+      {(grouped.cartões.length > 0 || grouped.formas.length > 0 || grouped.casal.length > 0) && (
+        <div className="space-y-4">
+          <div className="space-y-3">
+            {cardCycles.map((c, i) => {
+              const key = 'cc-' + (c.id || c.pluggyAccountId || c.paymentMethod);
+              const open = expandedGroups.has(key);
+              const ativo = groupFilter === key;
+              const nome = (c.paymentMethod || 'Cartão');
+              const período = c.start && c.end ? dayjs(c.start).format('DD/MM') + ' – ' + dayjs(c.end).format('DD/MM') : '';
+              const qtde = (c.txs || []).length;
+              return (
+                <div key={key} className={`relative bg-gray-900/50 border rounded-2xl p-4 overflow-hidden transition-all duration-200 ${ativo ? 'border-emerald-500/40 ring-1 ring-emerald-500/20' : 'border-white/5'}`}>
+                  <div className="absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent pointer-events-none" />
+                  <button
+                    onClick={() => {
+                      setExpandedGroups((prev) => {
+                        if (prev.has(key)) return new Set([]);
+                        return new Set([key]);
+                      });
+                      setGroupFilter((f) => (ativo ? null : key));
+                    }}
+                    className="relative w-full flex items-center justify-between text-left gap-3 group"
+                  >
+                    <span className="flex items-center gap-2">
+                      <CreditCard className="w-4 h-4 text-violet-300" />
+                      <span className="text-sm font-semibold text-white uppercase tracking-wide">{nome}</span>
+                      <span className="text-[10px] bg-violet-500/10 text-violet-300 border border-violet-500/20 px-1.5 py-0.5 rounded-full">Fatura</span>
+                    </span>
+                    <span className="flex items-center gap-3">
+                      <span className="text-right">
+                        <span className="block text-base font-bold text-white">{formatCurrency(c.total || 0)}</span>
+                        <span className="block text-[11px] text-gray-500">ciclo {período} · {qtde} compras</span>
+                      </span>
+                      <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+                    </span>
+                  </button>
+                {open && (
+                  <div className="relative overflow-x-auto mt-3 pt-3 border-t border-white/[0.06]" style={{ animation: 'dropExpand 0.3s cubic-bezier(.22,.9,.32,1) both' }}>
+                    {groupTxs(key).length === 0 ? (
+                      <p className="text-gray-500 text-sm py-3">Nenhum lançamento neste filtro</p>
+                    ) : (
+                      <table className="w-full text-sm min-w-[720px]">
+                        <thead>
+                          <tr className="text-left text-gray-400 border-b border-white/5">
+                            <th className="px-3 py-2 w-8"></th>
+                            <th className="px-3 py-2 font-medium">Data</th>
+                            <th className="px-3 py-2 font-medium">Descrição</th>
+                            <th className="px-3 py-2 font-medium">Categoria</th>
+                            <th className="px-3 py-2 font-medium">Pagamento</th>
+                            <th className="px-3 py-2 font-medium">Pessoa</th>
+                            <th className="px-3 py-2 font-medium">Parcelas</th>
+                            <th className="px-3 py-2 font-medium">Tipo</th>
+                            <th className="px-3 py-2 font-medium text-right">Valor</th>
+                            <th className="px-3 py-2 font-medium text-right">Ações</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {groupTxs(key).map((t) => (
+                            <tr key={t.id} className="border-b border-white/[0.03] transition-colors duration-150 hover:bg-white/[0.02]">
+                              <td className="px-3 py-2">
+                                <label className="inline-flex items-center cursor-pointer relative">
+                        <input type="checkbox" checked={selected.has(t.id)} onChange={() => toggleSelect(t.id)} className="peer sr-only" />
+                        <span className={`flex h-4 w-4 items-center justify-center rounded-md border transition-all duration-150 ${selected.has(t.id) ? 'bg-emerald-500 border-emerald-500 shadow-[0_0_8px_-2px_rgba(16,185,129,0.6)]' : 'bg-gray-900/60 border-gray-600 hover:border-emerald-400/60'}`}>
+                          {selected.has(t.id) && <Check className="w-3 h-3 text-gray-950" strokeWidth={3} />}
+                        </span>
+                      </label>
+                              </td>
+                              <td className="px-3 py-2 text-gray-400">{dayjs(t.date).format('DD/MM/YYYY')}</td>
+                              <td className="px-3 py-2 text-white">{t.description}</td>
+                              <td className="px-3 py-2">
+                                {t.categoryName ? (
+                                  <span className="inline-flex px-2 py-0.5 rounded-full text-xs bg-white/5 text-gray-300">{t.categoryName}</span>
+                                ) : (
+                                  <span className="text-gray-500">-</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-gray-400">
+                                {t.paymentMethod || '-'}
+                                {t.isCreditCard && (
+                                  <span className="ml-2 inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-violet-500/10 text-violet-300 border border-violet-500/20">Cartão</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-gray-400">{personLabel[t.person || ''] || t.person}</td>
+                              <td className="px-3 py-2 text-gray-400">
+                                {t.totalInstallments && t.totalInstallments > 1
+                                  ? `${t.currentInstallment || 1}/${t.totalInstallments}`
+                                  : '-'}
+                              </td>
+                              <td className="px-3 py-2">
+                                <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium border ${t.type === 'INCOME' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
+                                  {typeLabel[t.type] || t.type}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-right font-medium text-red-400">
+                                {editingAmount?.id === t.id ? (
+                                  <div className="flex items-center justify-end gap-1">
+                                    <input type="number" step="0.01" min="0.01" value={editingAmount.value} onChange={(e) => setEditingAmount({ id: t.id, value: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') handleAmountSave(t.id); if (e.key === 'Escape') setEditingAmount(null); }} autoFocus className="w-24 bg-gray-800 border border-white/10 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50" />
+                                    <button onClick={() => handleAmountSave(t.id)} className="p-1 text-emerald-400 hover:text-emerald-300 rounded hover:bg-emerald-500/10 transition-colors"><Check className="w-4 h-4" /></button>
+                                    <button onClick={() => setEditingAmount(null)} className="p-1 text-gray-400 hover:text-red-400 rounded hover:bg-red-500/10 transition-colors"><X className="w-4 h-4" /></button>
+                                  </div>
+                                ) : (
+                                  <button onClick={() => setEditingAmount({ id: t.id, value: String(t.amount) })} className="hover:text-emerald-400 transition-colors">
+                                    {formatCurrency(Math.abs(t.amount))}
+                                  </button>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <button onClick={() => handleEdit(t)} className="p-1.5 hover:bg-white/5 rounded-lg text-gray-400 hover:text-white transition-colors"><Pencil className="w-4 h-4" /></button>
+                                  <button onClick={() => handleDeleteRequest(t.id)} className="p-1.5 hover:bg-red-500/10 rounded-lg text-gray-400 hover:text-red-400 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                )}
+                </div>
+              );
+            })}
+
+          </div>
+          <div className="space-y-3">
+            {grouped.formas.map(([nome, g]) => {
+              const key = 'fp-' + nome;
+              const open = expandedGroups.has(key);
+              const ativo = groupFilter === key;
+              return (
+              <div key={key} className={`relative bg-gray-900/50 border rounded-2xl p-4 overflow-hidden transition-all duration-200 ${ativo ? 'border-emerald-500/40 ring-1 ring-emerald-500/20' : 'border-white/5'}`}>
+                <div className="absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent pointer-events-none" />
+                <button
+                  onClick={() => {
+                    setExpandedGroups((prev) => {
+                      if (prev.has(key)) return new Set([]);
+                      return new Set([key]);
+                    });
+                    setGroupFilter((f) => (ativo ? null : key));
+                  }}
+                  className="relative w-full flex items-center justify-between text-left gap-3 group"
+                >
+                  <span className="flex items-center gap-2">
+                    <ArrowUpDown className="w-4 h-4 text-emerald-300" />
+                    <span className="text-sm font-semibold text-white uppercase tracking-wide">{nome}</span>
+                    <span className="text-[10px] bg-white/5 text-gray-300 border border-white/10 px-1.5 py-0.5 rounded-full">Débito</span>
+                  </span>
+                  <span className="flex items-center gap-3">
+                    <span className="text-right">
+                      <span className="block text-base font-bold text-white">{formatCurrency(g.total)}</span>
+                      <span className="block text-[11px] text-gray-500">{g.count} lançamento(s)</span>
+                    </span>
+                    <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+                  </span>
+                </button>
+                {open && (
+                  <div className="relative overflow-x-auto mt-3 pt-3 border-t border-white/[0.06]" style={{ animation: 'dropExpand 0.3s cubic-bezier(.22,.9,.32,1) both' }}>
+                    {groupTxs(key).length === 0 ? (
+                      <p className="text-gray-500 text-sm py-3">Nenhum lançamento neste filtro</p>
+                    ) : (
+                      <table className="w-full text-sm min-w-[720px]">
+                        <thead>
+                          <tr className="text-left text-gray-400 border-b border-white/5">
+                            <th className="px-3 py-2 w-8"></th>
+                            <th className="px-3 py-2 font-medium">Data</th>
+                            <th className="px-3 py-2 font-medium">Descrição</th>
+                            <th className="px-3 py-2 font-medium">Categoria</th>
+                            <th className="px-3 py-2 font-medium">Pagamento</th>
+                            <th className="px-3 py-2 font-medium">Pessoa</th>
+                            <th className="px-3 py-2 font-medium">Parcelas</th>
+                            <th className="px-3 py-2 font-medium">Tipo</th>
+                            <th className="px-3 py-2 font-medium text-right">Valor</th>
+                            <th className="px-3 py-2 font-medium text-right">Ações</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {groupTxs(key).map((t) => (
+                            <tr key={t.id} className="border-b border-white/[0.03] transition-colors duration-150 hover:bg-white/[0.02]">
+                              <td className="px-3 py-2">
+                                <label className="inline-flex items-center cursor-pointer relative">
+                        <input type="checkbox" checked={selected.has(t.id)} onChange={() => toggleSelect(t.id)} className="peer sr-only" />
+                        <span className={`flex h-4 w-4 items-center justify-center rounded-md border transition-all duration-150 ${selected.has(t.id) ? 'bg-emerald-500 border-emerald-500 shadow-[0_0_8px_-2px_rgba(16,185,129,0.6)]' : 'bg-gray-900/60 border-gray-600 hover:border-emerald-400/60'}`}>
+                          {selected.has(t.id) && <Check className="w-3 h-3 text-gray-950" strokeWidth={3} />}
+                        </span>
+                      </label>
+                              </td>
+                              <td className="px-3 py-2 text-gray-400">{dayjs(t.date).format('DD/MM/YYYY')}</td>
+                              <td className="px-3 py-2 text-white">{t.description}</td>
+                              <td className="px-3 py-2">
+                                {t.categoryName ? (
+                                  <span className="inline-flex px-2 py-0.5 rounded-full text-xs bg-white/5 text-gray-300">{t.categoryName}</span>
+                                ) : (
+                                  <span className="text-gray-500">-</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-gray-400">
+                                {t.paymentMethod || '-'}
+                                {t.isCreditCard && (
+                                  <span className="ml-2 inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-violet-500/10 text-violet-300 border border-violet-500/20">Cartão</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-gray-400">{personLabel[t.person || ''] || t.person}</td>
+                              <td className="px-3 py-2 text-gray-400">
+                                {t.totalInstallments && t.totalInstallments > 1
+                                  ? `${t.currentInstallment || 1}/${t.totalInstallments}`
+                                  : '-'}
+                              </td>
+                              <td className="px-3 py-2">
+                                <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium border ${t.type === 'INCOME' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
+                                  {typeLabel[t.type] || t.type}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-right font-medium text-red-400">
+                                {editingAmount?.id === t.id ? (
+                                  <div className="flex items-center justify-end gap-1">
+                                    <input type="number" step="0.01" min="0.01" value={editingAmount.value} onChange={(e) => setEditingAmount({ id: t.id, value: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') handleAmountSave(t.id); if (e.key === 'Escape') setEditingAmount(null); }} autoFocus className="w-24 bg-gray-800 border border-white/10 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50" />
+                                    <button onClick={() => handleAmountSave(t.id)} className="p-1 text-emerald-400 hover:text-emerald-300 rounded hover:bg-emerald-500/10 transition-colors"><Check className="w-4 h-4" /></button>
+                                    <button onClick={() => setEditingAmount(null)} className="p-1 text-gray-400 hover:text-red-400 rounded hover:bg-red-500/10 transition-colors"><X className="w-4 h-4" /></button>
+                                  </div>
+                                ) : (
+                                  <button onClick={() => setEditingAmount({ id: t.id, value: String(t.amount) })} className="hover:text-emerald-400 transition-colors">
+                                    {formatCurrency(Math.abs(t.amount))}
+                                  </button>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <button onClick={() => handleEdit(t)} className="p-1.5 hover:bg-white/5 rounded-lg text-gray-400 hover:text-white transition-colors"><Pencil className="w-4 h-4" /></button>
+                                  <button onClick={() => handleDeleteRequest(t.id)} className="p-1.5 hover:bg-red-500/10 rounded-lg text-gray-400 hover:text-red-400 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                )}
+              </div>
+              );
+            })}
+          </div>
+
+          {grouped.casal.length > 0 && (
+            <div className="relative bg-gray-900/50 border border-white/5 rounded-2xl p-4 overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent pointer-events-none" />
+              <div className="relative">
+                <h3 className="text-xs font-semibold tracking-wider text-sky-300 uppercase mb-3 flex items-center gap-2">
+                  <Users className="w-3.5 h-3.5" /> Transferências entre o casal ({grouped.casal.length})
+                </h3>
+                <div className="divide-y divide-white/[0.04]">
+                  {grouped.casal.map((t) => (
+                    <div key={t.id} className="flex items-center justify-between py-2 text-sm">
+                      <div>
+                        <div className="text-white">{t.description}</div>
+                        <div className="text-[11px] text-gray-500">{dayjs(t.date).format('DD/MM/YYYY')} · {t.paymentMethod || '-'}</div>
+                      </div>
+                      <div className="font-medium text-red-400">{formatCurrency(Math.abs(t.amount))}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="relative bg-gray-900/50 border border-white/5 rounded-2xl p-6 overflow-hidden text-center">
         <div className="absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent pointer-events-none" />
         <div className="relative">
           {loading ? (
-            <div className="flex items-center justify-center h-48">
+            <div className="flex items-center justify-center py-4">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-400" />
             </div>
-          ) : filtered.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-gray-400 border-b border-white/5">
-                    <th className="px-4 py-3 w-10">
-                      <input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0} onChange={toggleSelectAll} className="w-4 h-4 accent-emerald-500 cursor-pointer" />
-                    </th>
-                    <th className="px-4 py-3 font-medium">Data</th>
-                    <th className="px-4 py-3 font-medium">Descricao</th>
-                    <th className="px-4 py-3 font-medium">Categoria</th>
-                    <th className="px-4 py-3 font-medium">Pagamento</th>
-                    <th className="px-4 py-3 font-medium">Pessoa</th>
-                    <th className="px-4 py-3 font-medium">Parcelas</th>
-                    <th className="px-4 py-3 font-medium">Tipo</th>
-                    <th className="px-4 py-3 font-medium text-right">Valor</th>
-                    <th className="px-4 py-3 font-medium text-right">Acoes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((tx) => {
-                    const isSelected = selected.has(tx.id);
-                    const isEditing = editingAmount?.id === tx.id;
-                    return (
-                      <tr key={tx.id} className={`border-b border-white/[0.03] transition-colors duration-150 hover:bg-white/[0.02] ${isSelected ? 'bg-emerald-500/[0.07]' : ''}`}>
-                        <td className="px-4 py-3">
-                          <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(tx.id)} className="w-4 h-4 accent-emerald-500 cursor-pointer" />
-                        </td>
-                        <td className="px-4 py-3 text-gray-400">{dayjs(tx.date).format('DD/MM/YYYY')}</td>
-                        <td className="px-4 py-3 text-white">{tx.description}</td>
-                        <td className="px-4 py-3">
-                          {tx.categoryName ? (
-                            <span className="inline-flex px-2 py-0.5 rounded-full text-xs bg-white/5 text-gray-300">{tx.categoryName}</span>
-                          ) : (
-                            <span className="text-gray-500">-</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-gray-400">
-                          {tx.paymentMethod || '-'}
-                          {tx.isCreditCard && (
-                            <span className="ml-2 inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-violet-500/10 text-violet-300 border border-violet-500/20">
-                              Cartão
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-gray-400">{personLabel[tx.person || ''] || tx.person}</td>
-                        <td className="px-4 py-3 text-gray-400">
-                          {tx.totalInstallments && tx.totalInstallments > 1
-                            ? `${tx.currentInstallment || 1}/${tx.totalInstallments}`
-                            : '-'}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium border ${tx.type === 'INCOME' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[0_0_8px_-2px_rgba(16,185,129,0.3)]' : 'bg-red-500/10 text-red-400 border-red-500/20 shadow-[0_0_8px_-2px_rgba(239,68,68,0.3)]'}`}>
-                            {typeLabel[tx.type] || tx.type}
-                          </span>
-                        </td>
-                        <td className={`px-4 py-3 text-right font-medium ${tx.type === 'INCOME' ? 'text-emerald-400' : 'text-red-400'}`}>
-                          {isEditing ? (
-                            <div className="flex items-center justify-end gap-1">
-                              <input type="number" step="0.01" min="0.01" value={editingAmount.value} onChange={(e) => setEditingAmount({ id: tx.id, value: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') handleAmountSave(tx.id); if (e.key === 'Escape') setEditingAmount(null); }} autoFocus className="w-28 bg-gray-800 border border-white/10 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50" />
-                              <button onClick={() => handleAmountSave(tx.id)} className="p-1 text-emerald-400 hover:text-emerald-300 rounded hover:bg-emerald-500/10 transition-colors"><Check className="w-4 h-4" /></button>
-                              <button onClick={() => setEditingAmount(null)} className="p-1 text-gray-400 hover:text-red-400 rounded hover:bg-red-500/10 transition-colors"><X className="w-4 h-4" /></button>
-                            </div>
-                          ) : (
-                            <button onClick={() => setEditingAmount({ id: tx.id, value: String(tx.amount) })} className="hover:text-emerald-400 transition-colors">
-                              {tx.type === 'INCOME' ? '+' : '-'}{formatCurrency(Math.abs(tx.amount))}
-                            </button>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <button onClick={() => handleEdit(tx)} className="p-1.5 hover:bg-white/5 rounded-lg text-gray-400 hover:text-white transition-colors"><Pencil className="w-4 h-4" /></button>
-                            <button onClick={() => handleDeleteRequest(tx.id)} className="p-1.5 hover:bg-red-500/10 rounded-lg text-gray-400 hover:text-red-400 transition-colors"><Trash2 className="w-4 h-4" /></button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
           ) : (
-            <p className="text-gray-500 text-center py-12">Nenhuma transacao encontrada</p>
+            <p className="text-gray-500 text-sm">
+              {filtered.length === 0
+                ? 'Nenhuma transação encontrada nos filtros'
+                : 'Os lançamentos aparecem dentro de cada cartão/conta acima — clique para abrir.'}
+            </p>
           )}
         </div>
       </div>
@@ -360,7 +622,7 @@ export default function Transactions() {
 
       {deleteTarget && (
         <ConfirmModal
-          title="Excluir transacao(es)"
+          title="Excluir transação(es)"
           message={deleteMessage}
           confirmLabel="Excluir"
           onConfirm={confirmDelete}

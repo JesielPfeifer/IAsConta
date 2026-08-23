@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Repeat, Plus, Trash2, Pencil, Check, X, Loader2, CalendarCheck } from 'lucide-react';
 import { api } from '../api/client';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
 interface FixedIncome {
   id: string;
@@ -58,9 +59,7 @@ export default function FixedIncomesCard() {
     }
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useAutoRefresh(load, []);
 
   function flash(ok: boolean, text: string) {
     setMsg({ ok, text });

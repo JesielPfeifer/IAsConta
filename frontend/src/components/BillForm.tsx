@@ -38,7 +38,7 @@ export default function BillForm({ onSave, onClose }: Props) {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError('');
-    if (!name.trim()) { setError('Nome e obrigatorio'); return; }
+    if (!name.trim()) { setError('Nome e obrigatório'); return; }
     if (!amount || parseFloat(amount) <= 0) { setError('Valor invalido'); return; }
     await onSave({
       name: name.trim(),
@@ -92,7 +92,7 @@ export default function BillForm({ onSave, onClose }: Props) {
           <div>
             <label className="block text-sm font-medium text-gray-400 mb-1">Parcelas</label>
             <input type="number" min="1" max="120" value={totalInstallments} onChange={(e) => setTotalInstallments(parseInt(e.target.value) || 1)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50" />
-            {totalInstallments > 1 && <p className="text-xs text-gray-500 mt-1">Sera criada 1 conta como parcela 1 de {totalInstallments}</p>}
+            {totalInstallments > 1 && <p className="text-xs text-gray-500 mt-1">Será criada 1 conta como parcela 1 de {totalInstallments}</p>}
           </div>
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose} className="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 px-4 py-2.5 rounded-lg text-sm transition-colors">Cancelar</button>
