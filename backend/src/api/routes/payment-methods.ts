@@ -8,11 +8,15 @@ const prisma = new PrismaClient();
 router.use(authMiddleware);
 
 // GET /api/payment-methods — list user's payment methods
+// Optional ?active=true returns only active methods (for transaction forms)
 router.get("/", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
     const methods = await prisma.paymentMethod.findMany({
-      where: { userId: user.id },
+      where: {
+        userId: user.id,
+        ...(req.query.active === "true" ? { active: true } : {}),
+      },
       orderBy: [{ type: "asc" }, { name: "asc" }],
     });
     res.json(methods);
