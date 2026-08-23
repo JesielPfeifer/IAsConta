@@ -1,6 +1,6 @@
 const API_URL = import.meta.env.VITE_API_URL || '';
 
-export async function api(path: string, options: RequestInit = {}) {
+export async function api<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem('token');
   const isFormData = options.body instanceof FormData;
   const headers: Record<string, string> = {

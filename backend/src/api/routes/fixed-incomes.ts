@@ -1,4 +1,3 @@
-import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { authMiddleware } from "../middleware/auth.js";
@@ -18,7 +17,7 @@ router.get("/", async (req: Request, res: Response) => {
     });
     res.json(incomes);
   } catch (err) {
-    logger.error("[fixed-incomes] list:", err);
+    console.error("[fixed-incomes] list:", err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -58,7 +57,7 @@ router.post("/", async (req: Request, res: Response) => {
     });
     res.status(201).json(created);
   } catch (err) {
-    logger.error("[fixed-incomes] create:", err);
+    console.error("[fixed-incomes] create:", err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -98,7 +97,7 @@ router.put("/:id", async (req: Request, res: Response) => {
     const updated = await prisma.fixedIncome.update({ where: { id }, data });
     res.json(updated);
   } catch (err) {
-    logger.error("[fixed-incomes] update:", err);
+    console.error("[fixed-incomes] update:", err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -118,7 +117,7 @@ router.delete("/:id", async (req: Request, res: Response) => {
     await prisma.fixedIncome.delete({ where: { id } });
     res.json({ ok: true });
   } catch (err) {
-    logger.error("[fixed-incomes] delete:", err);
+    console.error("[fixed-incomes] delete:", err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -204,7 +203,7 @@ router.post("/apply", async (req: Request, res: Response) => {
 
     res.json({ month, created, skipped });
   } catch (err) {
-    logger.error("[fixed-incomes] apply:", err);
+    console.error("[fixed-incomes] apply:", err);
     res.status(500).json({ error: "Erro interno" });
   }
 });

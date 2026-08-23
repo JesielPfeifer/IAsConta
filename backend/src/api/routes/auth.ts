@@ -1,4 +1,3 @@
-import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
@@ -13,7 +12,7 @@ const router = Router();
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET as string;
 if (!JWT_SECRET) {
-  logger.error("[FATAL] JWT_SECRET env var is required");
+  console.error("[FATAL] JWT_SECRET env var is required");
   process.exit(1);
 }
 
@@ -172,7 +171,7 @@ router.post("/register", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -224,7 +223,7 @@ router.post("/login", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -253,7 +252,7 @@ router.post("/forgot-password", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -288,7 +287,7 @@ router.post("/reset-password", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Dados inválidos", details: err.errors });
       return;
     }
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -320,7 +319,7 @@ router.post(
         res.status(400).json({ error: "Dados inválidos", details: err.errors });
         return;
       }
-      logger.error(err);
+      console.error(err);
       res.status(500).json({ error: "Erro interno" });
     }
   }
