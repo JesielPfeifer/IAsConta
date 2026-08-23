@@ -1,13 +1,16 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { LayoutDashboard, ArrowLeftRight, Calendar, Settings, LogOut, Wallet, Wallet2 } from 'lucide-react';
+import { LayoutDashboard, ArrowLeftRight, Calendar, Settings, LogOut, Wallet, Wallet2, Target, TrendingUp, BarChart3 } from 'lucide-react';
 import ChatBot from './ChatBot';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/transactions', icon: ArrowLeftRight, label: 'Transacoes' },
   { to: '/bills', icon: Calendar, label: 'Contas a Pagar' },
+  { to: '/goals', icon: Target, label: 'Metas' },
+  { to: '/investments', icon: TrendingUp, label: 'Investimentos' },
   { to: '/salary', icon: Wallet, label: 'Salario' },
+  { to: '/annual', icon: BarChart3, label: 'Panorama Anual' },
   { to: '/setup', icon: Settings, label: 'Configuracao' },
 ];
 

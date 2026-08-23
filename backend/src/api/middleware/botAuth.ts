@@ -1,9 +1,8 @@
-import { logger } from '../../lib/logger.js';
 import { Request, Response, NextFunction } from "express";
 
 const BOT_API_KEY = process.env.BOT_API_KEY;
 if (!BOT_API_KEY) {
-  logger.error("[FATAL] BOT_API_KEY env var is required");
+  console.error("[FATAL] BOT_API_KEY env var is required");
   process.exit(1);
 }
 

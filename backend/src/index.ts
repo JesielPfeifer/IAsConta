@@ -1,4 +1,3 @@
-import { logger } from './lib/logger.js';
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -22,7 +21,6 @@ import paymentMethodRoutes from "./api/routes/payment-methods.js";
 import fixedIncomeRoutes from "./api/routes/fixed-incomes.js";
 import pluggyRoutes from "./api/routes/pluggy.js";
 import settingsRoutes from "./api/routes/settings.js";
-import cardsRoutes from "./api/routes/cards.js";
 import annualRoutes from "./api/routes/annual.js";
 import { startWhatsApp, sendMessage } from "./bot/platforms/whatsapp.js";
 import { startDiscord } from "./bot/platforms/discord.js";
@@ -34,24 +32,6 @@ import { callApi } from "./bot/client.js";
 
 const app = express();
 app.set("trust proxy", 1);
-
-// Request logging (arquivo diario) - metodo, rota, status e duracao
-app.use((req, res, next) => {
-  const start = Date.now();
-  res.on("finish", () => {
-    const route = req.originalUrl.split("?")[0];
-    if (route.startsWith("/api") || route.startsWith("/webhook")) {
-      logger.http("request", {
-        method: req.method,
-        path: route,
-        status: res.statusCode,
-        ms: Date.now() - start,
-        ip: req.headers["x-forwarded-for"] || req.ip,
-      });
-    }
-  });
-  next();
-});
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -68,7 +48,7 @@ function assertRequiredSecrets(): void {
   ];
   for (const [name, value] of required) {
     if (!value) {
-      logger.error(`[config] FATAL: ${name} não configurado — defina no .env (sem fallback, o servidor não inicia).`);
+      console.error(`[config] FATAL: ${name} não configurado — defina no .env (sem fallback, o servidor não inicia).`);
       process.exit(1);
     }
   }
@@ -104,7 +84,6 @@ app.use("/api/payment-methods", paymentMethodRoutes);
 app.use("/api/fixed-incomes", fixedIncomeRoutes);
 app.use("/api/pluggy", pluggyRoutes);
 app.use("/api/settings", settingsRoutes);
-app.use("/api/cards", cardsRoutes);
 app.use("/api/annual", annualRoutes);
 
 app.post("/api/parse/nubank", upload.single("file"), async (req, res) => {
@@ -140,13 +119,13 @@ app.post("/webhook/evolution", async (req, res) => {
     // webhooks, and a missing secret stops the server at startup.
     const expectedSecret = process.env.EVOLUTION_WEBHOOK_SECRET;
     if (!expectedSecret) {
-      logger.error("[webhook] FATAL: EVOLUTION_WEBHOOK_SECRET not configured");
+      console.error("[webhook] FATAL: EVOLUTION_WEBHOOK_SECRET not configured");
       res.status(500).json({ error: "Server misconfiguration" });
       return;
     }
     const webhookSecret = req.headers["x-webhook-secret"] as string;
     if (webhookSecret !== expectedSecret) {
-      logger.warn(`[webhook] Invalid webhook secret, rejecting. received=${JSON.stringify(webhookSecret)}`);
+      console.warn(`[webhook] Invalid webhook secret, rejecting. received=${JSON.stringify(webhookSecret)}`);
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
@@ -293,7 +272,7 @@ app.post("/webhook/evolution", async (req, res) => {
                     });
                     imported++;
                   } catch (e) {
-                    logger.error("[webhook] Failed to import CSV tx:", e);
+                    console.error("[webhook] Failed to import CSV tx:", e);
                   }
                 }
                 await sendMessage(instanceName, senderId, `Nubank CSV processado: ${imported} transacoes importadas de ${parsed.transactions.length} encontradas.`);
@@ -321,7 +300,7 @@ app.post("/webhook/evolution", async (req, res) => {
                     });
                     imported++;
                   } catch (e) {
-                    logger.error("[webhook] Failed to import PDF tx:", e);
+                    console.error("[webhook] Failed to import PDF tx:", e);
                   }
                 }
                 const periodStr = parsed.metadata?.period || "periodo nao identificado";
@@ -337,7 +316,7 @@ app.post("/webhook/evolution", async (req, res) => {
             await sendMessage(instanceName, senderId, "Nao foi possivel baixar o arquivo. Tente enviar novamente ou use o painel web para importar.");
           }
         } catch (err) {
-          logger.error("[webhook] File processing error:", err);
+          console.error("[webhook] File processing error:", err);
           await sendMessage(instanceName, senderId, "Erro ao processar o arquivo enviado.");
         }
       }
@@ -348,26 +327,26 @@ app.post("/webhook/evolution", async (req, res) => {
 
     res.sendStatus(200);
   } catch (err) {
-    logger.error("[webhook] Error:", err);
+    console.error("[webhook] Error:", err);
     res.sendStatus(200);
   }
 });
 
 app.use(
   (err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-    logger.error("Unhandled error:", err);
+    console.error("Unhandled error:", err);
     res.status(500).json({ error: "Erro interno do servidor" });
   }
 );
 
 app.listen(PORT, async () => {
-  logger.info(`Backend running on http://localhost:${PORT}`);
+  console.log(`Backend running on http://localhost:${PORT}`);
   try {
     await startWhatsApp();
     await startDiscord();
     await startTelegram();
   } catch (err) {
-    logger.error("[bot] Init error:", err);
+    console.error("[bot] Init error:", err);
   }
 });
 

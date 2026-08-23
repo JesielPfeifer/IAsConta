@@ -1,4 +1,3 @@
-import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { botAuthMiddleware } from "../middleware/botAuth.js";
@@ -147,7 +146,7 @@ router.get("/summary", async (req: Request, res: Response) => {
       res.status(400).json({ error: err.message });
       return;
     }
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Internal error" });
   }
 });
@@ -201,7 +200,7 @@ router.get("/by-category", async (req: Request, res: Response) => {
       res.status(400).json({ error: err.message });
       return;
     }
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Internal error" });
   }
 });
@@ -280,7 +279,7 @@ router.get("/percentage", async (req: Request, res: Response) => {
       res.status(400).json({ error: err.message });
       return;
     }
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Internal error" });
   }
 });
@@ -516,7 +515,7 @@ router.get("/financial-health", async (req: Request, res: Response) => {
       endingSoonMonthly,
     });
   } catch (err) {
-    logger.error("[botDashboard] financial-health error:", err);
+    console.error("[botDashboard] financial-health error:", err);
     res.status(500).json({ error: "Erro ao calcular saúde financeira" });
   }
 });
@@ -537,7 +536,7 @@ router.get("/upcoming-bills", async (req: Request, res: Response) => {
 
     res.json(bills);
   } catch (err) {
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });

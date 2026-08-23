@@ -1,4 +1,3 @@
-import { logger } from '../../lib/logger.js';
 import { callApi } from '../client.js';
 import { chatWithGroq } from './groq.js';
 import { PrismaClient } from '@prisma/client';
@@ -81,7 +80,7 @@ export async function handleFinancialCommand(
 
       return { handled: true, message: msg };
     } catch (err) {
-      logger.error('[cmd] Saldo error:', err);
+      console.error('[cmd] Saldo error:', err);
       return { handled: true, message: 'Erro ao consultar saldo.' };
     }
   }
@@ -281,7 +280,7 @@ export async function handleFinancialCommand(
       }
       return { handled: true, message: msg };
     } catch (err) {
-      logger.error('[cmd] Saúde error:', err);
+      console.error('[cmd] Saúde error:', err);
       return { handled: true, message: 'Erro ao consultar saúde financeira.' };
     }
   }

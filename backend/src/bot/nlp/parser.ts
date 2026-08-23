@@ -1,4 +1,3 @@
-import { logger } from '../../lib/logger.js';
 import { parseWithRegex, extractPaymentMethod, extractInstallments as extractTxInstallments, type ParsedTransaction } from './regex.js';
 import { parseWithGroq, chatWithGroq } from './groq.js';
 import { callApi } from '../client.js';
@@ -358,7 +357,7 @@ export async function processMessage(
       }
       return { success: true, message: msg };
     } catch (err) {
-      logger.error('[nlp] Balance query failed:', err);
+      console.error('[nlp] Balance query failed:', err);
       return { success: true, message: 'Erro ao consultar saldo.' };
     }
   }
@@ -382,7 +381,7 @@ export async function processMessage(
         return { success: true, message: response };
       }
     } catch (err) {
-      logger.error('[nlp] Chat query failed:', err);
+      console.error('[nlp] Chat query failed:', err);
     }
   }
 
@@ -435,7 +434,7 @@ export async function processMessage(
           message: `Conta fixa criada: ${billName}${amountStr}${dayStr}${instStr}`,
         };
       } catch (err) {
-        logger.error('[nlp] Bill creation failed:', err);
+        console.error('[nlp] Bill creation failed:', err);
         return {
           success: false,
           message: 'Erro ao criar conta fixa.',
@@ -485,7 +484,7 @@ export async function processMessage(
         successCount++;
         results.push(`✓ ${parsed.description} - ${amountDisplay}`);
       } catch (err) {
-        logger.error('[nlp] Failed to process line:', line, err);
+        console.error('[nlp] Failed to process line:', line, err);
         results.push(`✗ ${line.trim()} (erro)`);
       }
     }
@@ -511,19 +510,19 @@ export async function processMessage(
   }
 
   if (parsed && parsed.transaction_type === 'income' && parsed.amount !== null && parsed.amount < 100) {
-    logger.info(`[nlp] Regex extracted suspicious amount ${parsed.amount} for income, trying Groq...`);
+    console.log(`[nlp] Regex extracted suspicious amount ${parsed.amount} for income, trying Groq...`);
     const groqParsed = await parseWithGroq(text, botUserId);
     if (groqParsed && groqParsed.amount !== null && groqParsed.amount > parsed.amount) {
-      logger.info(`[nlp] Groq corrected amount to ${groqParsed.amount}`);
+      console.log(`[nlp] Groq corrected amount to ${groqParsed.amount}`);
       parsed = groqParsed;
     }
   }
 
   if (parsed && parsed.transaction_type !== 'unknown' && parsed.amount !== null && parsed.amount < 10) {
-    logger.info(`[nlp] Regex extracted suspicious amount ${parsed.amount}, trying Groq...`);
+    console.log(`[nlp] Regex extracted suspicious amount ${parsed.amount}, trying Groq...`);
     const groqParsed = await parseWithGroq(text, botUserId);
     if (groqParsed && groqParsed.amount !== null && groqParsed.amount > parsed.amount) {
-      logger.info(`[nlp] Groq corrected amount to ${groqParsed.amount}`);
+      console.log(`[nlp] Groq corrected amount to ${groqParsed.amount}`);
       parsed = groqParsed;
     }
   }
@@ -630,7 +629,7 @@ export async function processMessage(
       message: formatConfirmation(parsed),
     };
   } catch (err) {
-    logger.error('[nlp] API call failed:', err);
+    console.error('[nlp] API call failed:', err);
     return {
       success: false,
       message: 'Erro ao registrar. Tente novamente mais tarde.',

@@ -1,4 +1,3 @@
-import { logger } from '../../lib/logger.js';
 import { PrismaClient } from '@prisma/client';
 
 const DEFAULT_INSTANCE = process.env.WHATSAPP_INSTANCE_NAME || 'contas';
@@ -55,7 +54,7 @@ async function configureInstanceWebhook(instanceName: string, userId?: string): 
   try {
     const webhookSecret = process.env.EVOLUTION_WEBHOOK_SECRET;
     if (!webhookSecret) {
-      logger.error('[whatsapp] EVOLUTION_WEBHOOK_SECRET not set — skipping per-instance webhook config');
+      console.error('[whatsapp] EVOLUTION_WEBHOOK_SECRET not set — skipping per-instance webhook config');
       return;
     }
     const apiUrl = await getEvoApiUrl(userId);
@@ -72,21 +71,21 @@ async function configureInstanceWebhook(instanceName: string, userId?: string): 
       }),
     });
     if (!res.ok) {
-      logger.error(`[whatsapp] Failed to configure webhook for "${instanceName}": ${res.status} ${await res.text()}`);
+      console.error(`[whatsapp] Failed to configure webhook for "${instanceName}": ${res.status} ${await res.text()}`);
     } else {
-      logger.info(`[whatsapp] Webhook configured for "${instanceName}"`);
+      console.log(`[whatsapp] Webhook configured for "${instanceName}"`);
     }
   } catch (err) {
-    logger.error(`[whatsapp] Webhook config error for "${instanceName}":`, err);
+    console.error(`[whatsapp] Webhook config error for "${instanceName}":`, err);
   }
 }
 
 export async function startWhatsApp(): Promise<void> {
   const botUserId = await getBotUserId();
   const apiUrl = await getEvoApiUrl(botUserId);
-  logger.info('[whatsapp] Evolution API client ready');
-  logger.info(`[whatsapp] API URL: ${apiUrl}`);
-  logger.info(`[whatsapp] Default instance: ${DEFAULT_INSTANCE}`);
+  console.log('[whatsapp] Evolution API client ready');
+  console.log(`[whatsapp] API URL: ${apiUrl}`);
+  console.log(`[whatsapp] Default instance: ${DEFAULT_INSTANCE}`);
   
   // Refresh group cache for default instance (backward compat)
   refreshGroupCache(DEFAULT_INSTANCE).catch(() => {});
@@ -111,7 +110,7 @@ export async function ensureInstanceForUser(instanceName: string, userId: string
         ? instances.some((i: any) => i.instanceName === instanceName || i.name === instanceName)
         : false;
       if (exists) {
-        logger.info(`[whatsapp] Instance "${instanceName}" already exists`);
+        console.log(`[whatsapp] Instance "${instanceName}" already exists`);
         return instanceName;
       }
     }
@@ -130,17 +129,17 @@ export async function ensureInstanceForUser(instanceName: string, userId: string
     });
 
     if (createRes.ok) {
-      logger.info(`[whatsapp] Instance "${instanceName}" created for user ${userId}`);
+      console.log(`[whatsapp] Instance "${instanceName}" created for user ${userId}`);
       // Configure per-instance webhook (global webhook can't send the secret header in v2.3.7)
       await configureInstanceWebhook(instanceName, userId);
       return instanceName;
     } else {
       const err = await createRes.text();
-      logger.error(`[whatsapp] Failed to create instance "${instanceName}": ${err}`);
+      console.error(`[whatsapp] Failed to create instance "${instanceName}": ${err}`);
       throw new Error(`Failed to create WhatsApp instance: ${err}`);
     }
   } catch (err) {
-    logger.error('[whatsapp] ensureInstanceForUser error:', err);
+    console.error('[whatsapp] ensureInstanceForUser error:', err);
     throw err;
   }
 }
@@ -167,14 +166,14 @@ export async function removeInstance(instanceName: string, userId?: string): Pro
     });
 
     if (delRes.ok) {
-      logger.info(`[whatsapp] Instance "${instanceName}" removed`);
+      console.log(`[whatsapp] Instance "${instanceName}" removed`);
       return true;
     }
     const err = await delRes.text();
-    logger.error(`[whatsapp] Failed to delete instance "${instanceName}": ${err}`);
+    console.error(`[whatsapp] Failed to delete instance "${instanceName}": ${err}`);
     return false;
   } catch (err) {
-    logger.error(`[whatsapp] removeInstance error for "${instanceName}":`, err);
+    console.error(`[whatsapp] removeInstance error for "${instanceName}":`, err);
     return false;
   }
 }
@@ -198,7 +197,7 @@ export async function getQRCode(instanceName?: string, userId?: string): Promise
 
     if (!res.ok) {
       const err = await res.text();
-      logger.error(`[whatsapp] QRCode error for "${name}": ${res.status} ${err}`);
+      console.error(`[whatsapp] QRCode error for "${name}": ${res.status} ${err}`);
       return { base64: null, connected: false };
     }
 
@@ -208,7 +207,7 @@ export async function getQRCode(instanceName?: string, userId?: string): Promise
       connected: false,
     };
   } catch (err) {
-    logger.error(`[whatsapp] getQRCode error for "${name}":`, err);
+    console.error(`[whatsapp] getQRCode error for "${name}":`, err);
     return { base64: null, connected: false };
   }
 }
@@ -240,14 +239,14 @@ async function ensureDefaultInstance(userId?: string): Promise<void> {
     });
 
     if (createRes.ok) {
-      logger.info(`[whatsapp] Default instance "${DEFAULT_INSTANCE}" created`);
+      console.log(`[whatsapp] Default instance "${DEFAULT_INSTANCE}" created`);
       await configureInstanceWebhook(DEFAULT_INSTANCE, userId);
     } else {
       const err = await createRes.text();
-      logger.error(`[whatsapp] Failed to create default instance: ${err}`);
+      console.error(`[whatsapp] Failed to create default instance: ${err}`);
     }
   } catch (err) {
-    logger.error('[whatsapp] ensureDefaultInstance error:', err);
+    console.error('[whatsapp] ensureDefaultInstance error:', err);
   }
 }
 
@@ -280,7 +279,7 @@ export async function disconnectInstance(instanceName?: string, userId?: string)
     });
     return res.ok;
   } catch (err) {
-    logger.error(`[whatsapp] disconnect error for "${name}":`, err);
+    console.error(`[whatsapp] disconnect error for "${name}":`, err);
     return false;
   }
 }
@@ -311,11 +310,11 @@ async function refreshGroupCache(instanceName?: string): Promise<void> {
       if (Array.isArray(groups)) {
         groupCacheEvictIfNeeded();
         groupCacheMap.set(name, { groups, timestamp: Date.now() });
-        logger.info(`[whatsapp] Group cache loaded for "${name}": ${groups.length} groups`);
+        console.log(`[whatsapp] Group cache loaded for "${name}": ${groups.length} groups`);
       }
     }
   } catch (err) {
-    logger.error(`[whatsapp] Failed to refresh group cache for "${name}":`, err);
+    console.error(`[whatsapp] Failed to refresh group cache for "${name}":`, err);
   }
 }
 
@@ -368,13 +367,13 @@ export async function sendMessage(
 
     if (!response.ok) {
       const errBody = await response.text();
-      logger.error(`[whatsapp] Failed to send message: ${response.status} ${errBody}`);
+      console.error(`[whatsapp] Failed to send message: ${response.status} ${errBody}`);
       return false;
     }
 
     return true;
   } catch (err) {
-    logger.error('[whatsapp] sendMessage error:', err);
+    console.error('[whatsapp] sendMessage error:', err);
     return false;
   }
 }

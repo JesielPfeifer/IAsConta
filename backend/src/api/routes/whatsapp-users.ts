@@ -1,4 +1,3 @@
-import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { PrismaClient } from "@prisma/client";
@@ -41,7 +40,7 @@ router.get("/", async (req: Request, res: Response) => {
       res.json({ ...wa, exists: true, connectionState: "error", connected: false });
     }
   } catch (err) {
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -72,7 +71,7 @@ router.post("/", async (req: Request, res: Response) => {
       try {
         await ensureInstanceForUser(instanceName, user.id);
       } catch (err: any) {
-        logger.error(`[whatsapp-users] Failed to ensure instance:`, err);
+        console.error(`[whatsapp-users] Failed to ensure instance:`, err);
       }
       res.json({
         message: "WhatsApp já vinculado",
@@ -105,7 +104,7 @@ router.post("/", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Telefone inválido", details: err.errors });
       return;
     }
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -125,7 +124,7 @@ router.delete("/", async (req: Request, res: Response) => {
 
     // Remove Evolution API instance
     await removeInstance(existing.instanceName, user.id).catch((err) => {
-      logger.error(`[whatsapp-users] Failed to remove instance ${existing.instanceName}:`, err);
+      console.error(`[whatsapp-users] Failed to remove instance ${existing.instanceName}:`, err);
     });
 
     // Delete from DB
@@ -135,7 +134,7 @@ router.delete("/", async (req: Request, res: Response) => {
 
     res.json({ message: "WhatsApp desvinculado e instância removida" });
   } catch (err) {
-    logger.error(err);
+    console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
 });
@@ -156,7 +155,7 @@ router.get("/qrcode", async (req: Request, res: Response) => {
     const result = await getQRCode(wa.instanceName, user.id);
     res.json(result);
   } catch (err) {
-    logger.error("[whatsapp-users] qrcode error:", err);
+    console.error("[whatsapp-users] qrcode error:", err);
     res.status(500).json({ error: "Erro ao gerar QR Code" });
   }
 });
@@ -177,7 +176,7 @@ router.post("/disconnect", async (req: Request, res: Response) => {
     const ok = await disconnectInstance(wa.instanceName, user.id);
     res.json({ success: ok });
   } catch (err) {
-    logger.error("[whatsapp-users] disconnect error:", err);
+    console.error("[whatsapp-users] disconnect error:", err);
     res.status(500).json({ success: false, error: "Erro ao desconectar" });
   }
 });
