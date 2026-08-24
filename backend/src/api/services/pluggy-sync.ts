@@ -801,7 +801,7 @@ async function syncCreditCard(
     const futureReal = await prisma.transaction.count({
       where: {
         userId,
-        paymentMethod: account.marketingName || account.name || "",
+        paymentMethod,
         installmentGroupId: groupPrefix,
         currentInstallment: { gt: currentInstallment },
         NOT: { externalId: { startsWith: "proj_" } },
@@ -812,7 +812,7 @@ async function syncCreditCard(
       ((await prisma.transaction.aggregate({
         where: {
           userId,
-          paymentMethod: account.marketingName || account.name || "",
+          paymentMethod,
           installmentGroupId: groupPrefix,
           externalId: { not: { startsWith: "proj_" } },
         },
@@ -860,7 +860,7 @@ async function syncCreditCard(
             date: new Date(Date.UTC(fy, fm - 1, Math.min(lastDay, dayOfPurchase), 12)),
             person: ownerPerson || null,
             isCreditCard: true,
-            paymentMethod: account.marketingName || account.name || "Cartão",
+            paymentMethod,
             totalInstallments,
             currentInstallment: currentInstallment + k,
             installmentGroupId: groupPrefix,
