@@ -111,6 +111,28 @@ export default function Bills() {
 
   useAutoRefresh(loadBills, []);
 
+  // Faturas previstas do mês corrente: enquanto a fatura oficial (Pluggy) não é
+  // publicada em Contas a pagar, mostra a projeção dos lançamentos do cartão.
+  async function loadForecasts(currentBills?: Bill[]) {
+    try {
+      const cards = await api<any[]>('/api/transactions/card-cycle?month=' + dayjs().format('YYYY-MM'));
+      const base = currentBills ?? bills;
+      const list: ForecastCard[] = [];
+      for (const c of cards || []) {
+        const official = base.some(
+          (b) => b.source === 'PLUGGY' && b.name.toLowerCase().includes(String(c.paymentMethod).toLowerCase())
+        );
+        if (!official) {
+          list.push({ paymentMethod: c.paymentMethod, total: c.total, count: c.count });
+        }
+      }
+      setForecasts(list);
+    } catch {
+      // silencioso: card prevista é auxiliar
+    }
+  }
+  useEffect(() => { loadForecasts(); }, [bills]);
+
   async function togglePaid(bill: Bill) {
     await api(`/api/bills/${bill.id}`, {
       method: 'PUT',
