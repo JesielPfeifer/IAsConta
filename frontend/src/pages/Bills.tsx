@@ -76,7 +76,7 @@ interface ForecastCard {
   paymentMethod: string;
   total: number;
   count: number;
-  officialAmount?: number | null;
+  month: string;
 }
 
 export default function Bills() {
@@ -111,19 +111,27 @@ export default function Bills() {
 
   useAutoRefresh(loadBills, []);
 
-  // Faturas previstas do mês corrente: enquanto a fatura oficial (Pluggy) não é
+  // Faturas previstas por mês: enquanto a fatura oficial (Pluggy) não é
   // publicada em Contas a pagar, mostra a projeção dos lançamentos do cartão.
+  // Busca o mês atual e o anterior (fatura acumulando do ciclo aberto).
   async function loadForecasts(currentBills?: Bill[]) {
     try {
-      const cards = await api<any[]>('/api/transactions/card-cycle?month=' + dayjs().format('YYYY-MM'));
+      const months = [0, -1].map((d) => dayjs().add(d, 'month').format('YYYY-MM'));
+      const results = await Promise.all(
+        months.map((m) => api<any[]>('/api/transactions/card-cycle?month=' + m).then((cards) => ({ m, cards })))
+      );
       const base = currentBills ?? bills;
       const list: ForecastCard[] = [];
-      for (const c of cards || []) {
-        const official = base.some(
-          (b) => b.source === 'PLUGGY' && b.name.toLowerCase().includes(String(c.paymentMethod).toLowerCase())
-        );
-        if (!official) {
-          list.push({ paymentMethod: c.paymentMethod, total: c.total, count: c.count });
+      for (const { m, cards } of results) {
+        for (const c of cards || []) {
+          if (!c.total || !c.count) continue;
+          const official = base.some(
+            (b) => b.source === 'PLUGGY' && b.name.toLowerCase().includes(String(c.paymentMethod).toLowerCase())
+              && dayjs(b.dueDate).format('YYYY-MM') === m
+          );
+          if (!official) {
+            list.push({ paymentMethod: c.paymentMethod, total: c.total, count: c.count, month: m });
+          }
         }
       }
       setForecasts(list);
@@ -307,6 +315,31 @@ const filteredBills = bills.filter((b) => {
         </div>
       )}
 
+      {/* Faturas previstas do mês filtrado (enquanto a oficial do Pluggy não é publicada) */}
+      {(() => {
+        const mk = `${yearFilter}-${String(monthFilter).padStart(2, '0')}`;
+        const hasOfficial = (pm: string) => bills.some(
+          (b) => b.source === 'PLUGGY'
+            && dayjs(b.dueDate).format('YYYY-MM') === mk
+            && b.name.toLowerCase().includes(String(pm).toLowerCase())
+        );
+        const rows = forecasts.filter((f: ForecastCard) => f.month === mk && !hasOfficial(f.paymentMethod));
+        if (rows.length === 0) return null;
+        return (
+          <div className="mb-4 grid gap-3 md:grid-cols-2">
+            {rows.map((f: ForecastCard) => (
+              <div key={f.paymentMethod + f.month} className="rounded-2xl bg-amber-500/5 border border-amber-500/20 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-medium text-amber-300 truncate">💳 Fatura prevista — {f.paymentMethod}</p>
+                  <span className="text-base font-semibold text-amber-200 whitespace-nowrap">{formatCurrency(f.total)}</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">{f.count} lançamento(s) · fatura oficial ainda não publicada pelo banco</p>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+
       <div className="relative bg-gray-900/50 border border-white/5 rounded-2xl overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent pointer-events-none" />
         <div className="relative">
@@ -339,20 +372,7 @@ const filteredBills = bills.filter((b) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {forecasts.length > 0 && (
-        <div className="mb-6 grid gap-3 md:grid-cols-2">
-          {forecasts.map((f: ForecastCard) => (
-            <div key={f.paymentMethod} className="rounded-2xl bg-amber-500/5 border border-amber-500/20 p-4 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-amber-300">Fatura prevista — {f.paymentMethod}</p>
-                <p className="text-xs text-gray-500">{f.count} lançamentos · oficial ainda não publicada pelo banco</p>
-              </div>
-              <span className="text-lg font-semibold text-amber-200">{formatCurrency(f.total)}</span>
-            </div>
-          ))}
-        </div>
-      )}
-      {[...pending, ...paid].map((b) => {
+                  {[...pending, ...paid].map((b) => {
                     const isOverdue = !b.isPaid && dayjs(b.dueDate).isBefore(dayjs(), 'day');
                     const isSelected = selected.has(b.id);
                     const isEditing = editingAmount?.id === b.id;
