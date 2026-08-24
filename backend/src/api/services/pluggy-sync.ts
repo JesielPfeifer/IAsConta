@@ -88,6 +88,112 @@ function bankNameFromAccountName(raw: string): string | null {
 }
 
 /**
+ * Resolve the real bank behind a Pluggy item. For MeuPluggy (Open Finance
+ * proxy) items the connector name is just "MeuPluggy" — the actual institution
+ * is in connector.institutionUrl (e.g. "caixa.gov.br" → "Caixa"). Falls back
+ * to BANK_ALIASES against the connector name itself.
+ */
+function getBankName(
+  connector?: { name?: string | null; institutionUrl?: string | null } | null,
+  accounts?: Array<{ name?: string | null }>
+): string | null {
+  const url = connector?.institutionUrl || "";
+  const host = url.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
+  // Match by domain so "banco.caixa.gov.br" and "www.caixa.gov.br" both hit.
+  for (const [pattern, label] of [
+    ["caixa", "Caixa"],
+    ["nubank", "Nubank"],
+    ["bb.com.br", "Banco do Brasil"],
+    ["bancodobrasil", "Banco do Brasil"],
+    ["itau", "Itaú"],
+    ["bradesco", "Bradesco"],
+    ["santander", "Santander"],
+    ["inter", "Inter"],
+    ["c6bank", "C6 Bank"],
+    ["banrisul", "Banrisul"],
+    ["sicoob", "Sicoob"],
+    ["sicredi", "Sicredi"],
+    ["pan", "PAN"],
+    ["original", "Original"],
+    ["btg", "BTG Pactual"],
+    ["will", "Will Bank"],
+    ["picpay", "PicPay"],
+    ["mercadopago|mercadolivre", "Mercado Pago"],
+    ["neon|pagmenos", "Neon"],
+    ["next|meubanco", "Next"],
+  ] as Array<[string, string]>) {
+    if (new RegExp(pattern, "i").test(host)) return label;
+  }
+  // No institutionUrl (or unrecognized host — MeuPluggy's own connector URL
+  // points at meu.pluggy.ai, not the bank): derive from the item's account
+  // names ("CAIXA VISA INFINITE CREDITO" → CAIXA), then the connector name.
+  const fromAccounts = accounts
+    ?.map((a) => bankNameFromAccountName(a.name || ""))
+    .find((n) => !!n);
+  return (
+    fromAccounts ||
+    bankNameFromAccountName(connector?.name || "")
+  );
+}
+
+/**
+ * Shifts a "YYYY-MM" month key by deltaMonths. Returns the key untouched when
+ * it's absent/malformed or the delta is zero.
+ */
+export function shiftMonthKey(
+  monthKey: string | null | undefined,
+  deltaMonths: number
+): string | null {
+  if (!monthKey) return null;
+  const m = /^(\d{4})-(\d{2})/.exec(monthKey);
+  if (!m || deltaMonths === 0) return monthKey;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const shifted = new Date(Date.UTC(y, mo - 1 + deltaMonths, 1));
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/**
+ * Detects the constant offset between Pluggy's per-transaction
+ * billForecastDate tag and the REAL invoice month of one card account.
+ *
+ * Some institutions (e.g. CAIXA via MeuPluggy) tag purchases with the month
+ * BEFORE the invoice that actually charges them: a purchase made 16/07–14/08
+ * that appears on the invoice due 25/08 arrives tagged "2026-07" instead of
+ * "2026-08". Installment rows carry creditCardMetadata.billId, which points at
+ * the Pluggy bill (= our local Bill.externalId) — comparing that bill's due
+ * date month against the transaction's tag yields the offset directly.
+ *
+ * Returns the most frequent non-negative difference (0 = tags are already the
+ * real invoice month). Ties resolve conservatively to the smaller offset so an
+ * ambiguous bank keeps today's behavior instead of being shifted on a guess.
+ */
+async function detectForecastOffset(
+  transactions: Array<{
+    creditCardMetadata?: {
+      billId?: string | null;
+      billForecastDate?: string | null;
+    } | null;
+  }>,
+  localBillDueByExternalId: Map<string, Date>
+): Promise<number> {
+  const diffCounts = new Map<number, number>();
+  for (const tx of transactions) {
+    const meta = tx.creditCardMetadata;
+    if (!meta?.billId || !meta.billForecastDate) continue;
+    const dueDate = localBillDueByExternalId.get(meta.billId);
+    if (!dueDate) continue;
+    const tagY = Number(meta.billForecastDate.slice(0, 4));
+    const tagM = Number(meta.billForecastDate.slice(5, 7));
+    const diff = (dueDate.getUTCFullYear() - tagY) * 12 + (dueDate.getUTCMonth() + 1 - tagM);
+    if (diff <= 0) continue; // negative/zero diffs are never a shift candidate
+    diffCounts.set(diff, (diffCounts.get(diff) || 0) + 1);
+  }
+  if (diffCounts.size === 0) return 0;
+  return [...diffCounts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0][0];
+}
+
+/**
  * Normalize a name for comparison: lowercase, no accents, no punctuation.
  */
 function normName(s: string | null | undefined): string {
@@ -314,6 +420,8 @@ export async function syncItem(itemId: string, userId: string): Promise<SyncResu
         status: pluggyItem.status,
         errorMessage: errMsg,
         lastSyncAt: new Date(),
+        // Accounts aren't fetched yet on this path — resolve from connector.
+        bankLabel: getBankName(pluggyItem.connector) || connection.bankLabel,
       },
     });
     return result;
@@ -385,6 +493,8 @@ export async function syncItem(itemId: string, userId: string): Promise<SyncResu
         result.errors.length > 0 ? result.errors.join("; ") : null,
       lastSyncAt: new Date(),
       connectorName: pluggyItem.connector?.name || connection.connectorName,
+      bankLabel:
+        getBankName(pluggyItem.connector, accounts) || connection.bankLabel,
     },
   });
 
@@ -532,6 +642,23 @@ async function syncCreditCard(
   const billByExternalId = new Map(
     userBills.filter((b) => b.externalId).map((b) => [b.externalId as string, b.id])
   );
+  // Same mapping, but keeping the invoice's due date — used to measure how far
+  // this institution's billForecastDate tags drift from the real invoice month.
+  const billDueByExternalId = new Map(
+    userBills
+      .filter((b) => b.externalId)
+      .map((b) => [b.externalId as string, b.dueDate])
+  );
+
+  // Some institutions (CAIXA via MeuPluggy) tag purchases with the month BEFORE
+  // the invoice that charges them. Detect the constant per-account offset and
+  // normalize every tag to the real invoice month below.
+  const forecastOffset = await detectForecastOffset(transactions, billDueByExternalId);
+  if (forecastOffset > 0) {
+    logger.info(
+      `[pluggy-sync] conta ${account.id}: billForecastDate deslocado em +${forecastOffset} mês(es) — normalizando para o mês real da fatura`
+    );
+  }
 
   for (const tx of transactions) {
     // PENDING purchases are imported too (dedupe by externalId prevents
@@ -598,8 +725,9 @@ async function syncCreditCard(
       billId: meta.billId ? (billByExternalId.get(meta.billId) ?? null) : null,
       // Pluggy already tells us which invoice month this purchase is charged
       // in (billForecastDate "YYYY-MM") — use it directly instead of inferring
-      // a closing cycle. Null when the field is absent (legacy rows).
-      billForecastMonth: meta.billForecastDate || null,
+      // a closing cycle, normalized by the institution's offset when its tags
+      // point to the month before the real invoice. Null when absent (legacy).
+      billForecastMonth: shiftMonthKey(meta.billForecastDate, forecastOffset),
       pluggyAccountId: account.id,
       totalInstallments,
       currentInstallment,

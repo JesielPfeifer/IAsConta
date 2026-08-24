@@ -7,6 +7,9 @@ interface PluggyConnection {
   bankName: string;
   itemId: string | null;
   connectorName: string | null;
+  // Real institution behind the item (e.g. "Caixa") — resolved at sync time
+  // from the Pluggy connector; null on connections never synced.
+  bankLabel: string | null;
   status: string | null;
   lastSyncAt: string | null;
   errorMessage: string | null;
@@ -398,7 +401,7 @@ export default function PluggySettingsCard() {
                     <div className="flex items-center gap-3 min-w-0">
                       <Landmark className="w-5 h-5 text-emerald-400 shrink-0" />
                       <div className="min-w-0">
-                        <p className="text-sm font-medium text-white truncate capitalize">pluggy - {shortBankName(conn.connectorName || conn.bankName)}</p>
+                        <p className="text-sm font-medium text-white truncate capitalize">pluggy - {shortBankName(conn.bankLabel || conn.connectorName || conn.bankName)}</p>
                         <p className="text-xs text-gray-500">
                           {conn.lastSyncAt
                             ? `Último sync: ${new Date(conn.lastSyncAt).toLocaleString('pt-BR')}`
