@@ -573,7 +573,10 @@ async function syncBankAccount(
     };
 
     if (existing) {
-      // Update mutable fields (description/amount may change on re-sync)
+      // Update mutable fields (description/amount may change on re-sync).
+      // Rows the user edited manually keep their values — only genuinely new
+      // Pluggy data (e.g. PENDING → POSTED) creates/updates untouched rows.
+      if (existing.manuallyEdited) continue;
       const changed =
         existing.amount !== data.amount ||
         existing.description !== data.description ||
@@ -739,6 +742,9 @@ async function syncCreditCard(
     };
 
     if (existing) {
+      // Update sync-driven fields (keep the user's category edits). Rows the
+      // user edited manually keep their values — no overwrite on re-sync.
+      if (existing.manuallyEdited) continue;
       // Keep the user's category edits; update only sync-driven fields
       // (person is sync-driven too: the account owner decides husband/wife).
       const changed =
@@ -815,6 +821,8 @@ async function upsertBill(
   };
 
   if (existing) {
+    // Fatura editada manualmente: preserva valor/vencimento/status/nome.
+    if (existing.manuallyEdited) return;
     const changed =
       existing.amount !== data.amount ||
       existing.dueDate.getTime() !== data.dueDate.getTime() ||

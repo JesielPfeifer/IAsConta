@@ -167,8 +167,24 @@ router.get("/", async (req: Request, res: Response) => {
     if (month) {
       const startOfMonth = new Date(`${month}-01T00:00:00.000Z`);
       const endOfMonth = new Date(startOfMonth);
-      endOfMonth.setMonth(endOfMonth.getMonth() + 1);
-      where.date = { gte: startOfMonth, lt: endOfMonth };
+      endOfMonth.setUTCMonth(endOfMonth.getUTCMonth() + 1);
+      delete where.date;
+      // Compras de cartão seguem o mês da FATURA (billForecastMonth informado
+      // pelo Pluggy), igual ao dashboard e ao card-cycle — ex.: compra de
+      // 18/08 com fatura 2026-09 aparece na lista de setembro. Lançamentos
+      // manuais/legado (sem billForecastMonth) ficam no mês civil da data.
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : []),
+        {
+          OR: [
+            { isCreditCard: true, billForecastMonth: month },
+            {
+              billForecastMonth: null,
+              date: { gte: startOfMonth, lt: endOfMonth },
+            },
+          ],
+        },
+      ];
     }
 
     if (categoryId) where.categoryId = categoryId as string;
@@ -234,6 +250,11 @@ router.put("/:id", async (req: Request, res: Response) => {
     const updateData: Record<string, unknown> = { ...data };
     if (data.date) {
       updateData.date = new Date(data.date);
+    }
+    // Importada do Pluggy + editada pelo usuário → o sync não sobrescreve mais
+    // esta linha no re-sincronismo (preserva correções de valor/data/etc.).
+    if (existing.source === "PLUGGY") {
+      updateData.manuallyEdited = true;
     }
 
     const transaction = await prisma.transaction.update({

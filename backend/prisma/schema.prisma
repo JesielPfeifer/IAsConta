@@ -58,6 +58,9 @@ model Transaction {
   // que a compra será cobrada. Vem do próprio Pluggy — elimina a necessidade de
   // adivinhar o ciclo de fechamento. Null para transações antigas/sem dado.
   billForecastMonth  String?
+  // Marcado quando o usuário edita uma transação importada do Pluggy: o sync
+  // passa a preservar os campos editados (não sobrescreve no re-sincronismo).
+  manuallyEdited     Boolean         @default(false)
   userId      String
   user        User            @relation(fields: [userId], references: [id])
   createdAt   DateTime        @default(now())
@@ -95,6 +98,9 @@ model Bill {
   source            Source    @default(MANUAL)
   externalId        String?   // Pluggy bill id (fatura) — dedupe
   pluggyAccountId   String?   // Pluggy credit card account id
+  // Marcado quando o usuário edita uma fatura importada do Pluggy: o sync
+  // preserva valor/vencimento/pagamento editados (não sobrescreve).
+  manuallyEdited    Boolean   @default(false)
   userId            String
   user              User      @relation(fields: [userId], references: [id])
   createdAt         DateTime  @default(now())
