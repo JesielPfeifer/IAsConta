@@ -78,7 +78,6 @@ router.get("/card-cycle", async (req: Request, res: Response) => {
     return;
   }
   const [y, m] = month.split("-").map(Number);
-  const BRT_OFFSET_H = 3; // banco armazena UTC; 00:00 BR = 03:00 UTC
 
   try {
     // Cartões de crédito: agrupa por paymentMethod (nome do cartão), unindo
@@ -95,52 +94,29 @@ router.get("/card-cycle", async (req: Request, res: Response) => {
       .map((r) => ({ paymentMethod: r.paymentMethod || "Cartão" }))
       .filter((v, i, arr) => arr.findIndex((x) => x.paymentMethod === v.paymentMethod) === i);
 
-    // Dia de fechamento por paymentMethod: do cardInvoiceDays configurado (pela
-    // conta Pluggy correspondente), ou inferido do vencimento (dueDate) das
-    // faturas Pluggy, ou 25 por padrão.
-    const userSettings = await prisma.userSettings.findUnique({ where: { userId: user.id } });
-    const cardCfg: any = (userSettings?.cardInvoiceDays as any) || {};
-    const pluggyRows = await prisma.transaction.findMany({
-      where: { userId: user.id, isCreditCard: true, pluggyAccountId: { not: null } },
-      select: { pluggyAccountId: true, paymentMethod: true },
-      distinct: ["pluggyAccountId", "paymentMethod"],
-    });
-    const pluggyIds = pluggyRows.map((r) => r.pluggyAccountId).filter(Boolean) as string[];
-    const bills = await prisma.bill.findMany({
-      where: { userId: user.id, source: "PLUGGY", pluggyAccountId: { in: pluggyIds } },
-      orderBy: { dueDate: "desc" },
-      select: { pluggyAccountId: true, dueDate: true },
-    });
-    const inferredDay: Record<string, number> = {};
-    for (const b of bills) {
-      if (b.pluggyAccountId && !inferredDay[b.pluggyAccountId]) inferredDay[b.pluggyAccountId] = b.dueDate.getUTCDate();
-    }
-    // paymentMethod -> dia de fechamento (da conta Pluggy com esse nome)
-    const pmDay: Record<string, number> = {};
-    for (const r of pluggyRows) {
-      const accId = r.pluggyAccountId as string;
-      const d = cardCfg[accId] || inferredDay[accId];
-      const pm = r.paymentMethod || "";
-      if (d && !pmDay[pm]) pmDay[pm] = d;
-    }
-    const closingDay = (pm: string) => pmDay[pm] || 25;
+    // Filtra pela FATURA informada pelo Pluggy (billForecastMonth = "YYYY-MM"),
+    // igual ao card de cartão do Dashboard. Não há mais dia de fechamento
+    // configurável pelo usuário: o Pluggy já retorna em qual mês a compra entra
+    // na fatura. Fallback: compras manuais/legado sem billForecastMonth caem no
+    // mês civil (date).
+    const monthKey = month; // "YYYY-MM" vindo da query
+    const [y0, m0] = month.split("-").map(Number);
+    const startOfMonth = new Date(Date.UTC(y0, m0 - 1, 1, 0, 0, 0));
+    const endOfMonth = new Date(Date.UTC(y0, m0, 1, 0, 0, 0));
 
     const result = [];
 
     for (const g of groups) {
       const pm = g.paymentMethod;
-      const D = closingDay(pm);
-      // Ciclo da fatura (horário do Brasil, UTC-3): cobre do dia D do mês
-      // anterior INCLUSIVE até o dia D do mês atual EXCLUSIVE.
-      // Ex.: fechamento dia 25 => 25/JUL 00:00 até 25/AGO 00:00 (BR).
-      const start = new Date(Date.UTC(y, m - 2, D, BRT_OFFSET_H));
-      const endExclusive = new Date(Date.UTC(y, m - 1, D, BRT_OFFSET_H));
       const txs = await prisma.transaction.findMany({
         where: {
           userId: user.id,
           isCreditCard: true,
           paymentMethod: pm,
-          date: { gte: start, lt: endExclusive },
+          OR: [
+            { billForecastMonth: monthKey },
+            { billForecastMonth: null, date: { gte: startOfMonth, lt: endOfMonth } },
+          ],
         },
         orderBy: { date: "desc" },
         include: { category: { select: { name: true } } },
@@ -152,11 +128,12 @@ router.get("/card-cycle", async (req: Request, res: Response) => {
         id: paymentMethod,
         pluggyAccountId: txs[0]?.pluggyAccountId ?? null,
         paymentMethod,
-        invoiceDay: D,
-        // Exibição: limites do ciclo da fatura (calendário BR).
-        start: start.toISOString(),
-        // último dia que entra na fatura = D-1 do mês atual (calendário BR)
-        end: new Date(Date.UTC(y, m - 1, D - 1, BRT_OFFSET_H)).toISOString(),
+        invoiceDay: null,
+        // Mês da fatura informado pelo Pluggy (billForecastMonth = "YYYY-MM").
+        // Substitui o ciclo de dia de fechamento (removido).
+        invoiceMonth: month,
+        start: null,
+        end: null,
         total: Math.round(total * 100) / 100,
         count: txs.length,
         txs: txs.map((t) => ({
@@ -190,8 +167,24 @@ router.get("/", async (req: Request, res: Response) => {
     if (month) {
       const startOfMonth = new Date(`${month}-01T00:00:00.000Z`);
       const endOfMonth = new Date(startOfMonth);
-      endOfMonth.setMonth(endOfMonth.getMonth() + 1);
-      where.date = { gte: startOfMonth, lt: endOfMonth };
+      endOfMonth.setUTCMonth(endOfMonth.getUTCMonth() + 1);
+      delete where.date;
+      // Compras de cartão seguem o mês da FATURA (billForecastMonth informado
+      // pelo Pluggy), igual ao dashboard e ao card-cycle — ex.: compra de
+      // 18/08 com fatura 2026-09 aparece na lista de setembro. Lançamentos
+      // manuais/legado (sem billForecastMonth) ficam no mês civil da data.
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : []),
+        {
+          OR: [
+            { isCreditCard: true, billForecastMonth: month },
+            {
+              billForecastMonth: null,
+              date: { gte: startOfMonth, lt: endOfMonth },
+            },
+          ],
+        },
+      ];
     }
 
     if (categoryId) where.categoryId = categoryId as string;
@@ -257,6 +250,11 @@ router.put("/:id", async (req: Request, res: Response) => {
     const updateData: Record<string, unknown> = { ...data };
     if (data.date) {
       updateData.date = new Date(data.date);
+    }
+    // Importada do Pluggy + editada pelo usuário → o sync não sobrescreve mais
+    // esta linha no re-sincronismo (preserva correções de valor/data/etc.).
+    if (existing.source === "PLUGGY") {
+      updateData.manuallyEdited = true;
     }
 
     const transaction = await prisma.transaction.update({

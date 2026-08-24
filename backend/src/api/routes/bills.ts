@@ -99,6 +99,11 @@ router.put("/:id", async (req: Request, res: Response) => {
     if (data.dueDate) {
       updateData.dueDate = new Date(data.dueDate);
     }
+    // Importada do Pluggy + editada pelo usuário → o sync não sobrescreve mais
+    // esta fatura no re-sincronismo (preserva valor/vencimento/status).
+    if (existing.source === "PLUGGY") {
+      updateData.manuallyEdited = true;
+    }
 
     const bill = await prisma.bill.update({
       where: { id: id as string },

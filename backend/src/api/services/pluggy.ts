@@ -294,7 +294,9 @@ export interface PluggyConnector {
 // ---------------------------------------------------------------
 export interface PluggyItem {
   id: string;
-  connector: { id: number; name: string };
+  // institutionUrl carries the real institution (e.g. "caixa.gov.br" for the
+  // MeuPluggy proxy) — connector.name alone is just "MeuPluggy".
+  connector: { id: number; name: string; institutionUrl?: string | null };
   status: string;
   statusDetail?: string;
   createdAt: string;

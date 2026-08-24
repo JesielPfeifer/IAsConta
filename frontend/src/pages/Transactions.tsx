@@ -338,7 +338,9 @@ export default function Transactions() {
               const open = expandedGroups.has(key);
               const ativo = groupFilter === key;
               const nome = (c.paymentMethod || 'Cartão');
-              const período = c.start && c.end ? dayjs(c.start).format('DD/MM') + ' – ' + dayjs(c.end).format('DD/MM') : '';
+              const período = c.invoiceMonth
+                ? (() => { const [yy, mm] = c.invoiceMonth.split('-'); return `${mm}/${yy}`; })()
+                : (c.start && c.end ? dayjs(c.start).format('DD/MM') + ' – ' + dayjs(c.end).format('DD/MM') : '');
               const qtde = (c.txs || []).length;
               return (
                 <div key={key} className={`relative bg-gray-900/50 border rounded-2xl p-4 overflow-hidden transition-all duration-200 ${ativo ? 'border-emerald-500/40 ring-1 ring-emerald-500/20' : 'border-white/5'}`}>
