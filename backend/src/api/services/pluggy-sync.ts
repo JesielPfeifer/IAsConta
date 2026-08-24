@@ -784,6 +784,97 @@ async function syncCreditCard(
       userId,
     };
 
+    // -------------------------------------------------------------
+    // Projeção de parcelas futuras: alguns bancos (CAIXA via MeuPluggy)
+    // só publicam a parcela CORRENTE — as seguintes aparecem só no mês em
+    // que vencem, subestimando faturas futuras. Bancos como Nubank já mandam
+    // todas. Detecta o caso (nenhuma parcela futura real deste grupo) e cria
+    // linhas projetadas com billForecastMonth adiantado; quando o banco
+    // publicar a parcela real, ela entra com externalId próprio (as proj_
+    // são limpas abaixo para não duplicar).
+    // -------------------------------------------------------------
+    // Grupo estável por descrição normalizada: a CAIXA gera hash DIFERENTE por
+    // parcela (installmentGroupKey), o que quebraria o agrupamento. Mesma compra
+    // parcelada => mesma chave aqui.
+    const descKey = (tx.description || "").replace(/\s+\d+\/\d+\s*$/, "").trim().toLowerCase();
+    const groupPrefix = `desc-${account.id}-${Buffer.from(descKey).toString("base64url")}`;
+    const futureReal = await prisma.transaction.count({
+      where: {
+        userId,
+        paymentMethod: account.marketingName || account.name || "",
+        installmentGroupId: groupPrefix,
+        currentInstallment: { gt: currentInstallment },
+        NOT: { externalId: { startsWith: "proj_" } },
+      },
+    });
+    const isTopKnown =
+      currentInstallment >=
+      ((await prisma.transaction.aggregate({
+        where: {
+          userId,
+          paymentMethod: account.marketingName || account.name || "",
+          installmentGroupId: groupPrefix,
+          externalId: { not: { startsWith: "proj_" } },
+        },
+        _max: { currentInstallment: true },
+      }))._max.currentInstallment ?? 0);
+    // Só projeta UMA vez por grupo: quando esta tx é a mais avançada conhecida
+    if (
+      isTopKnown &&
+      futureReal === 0 &&
+      meta.billForecastDate &&
+      totalInstallments > 1 &&
+      currentInstallment < totalInstallments
+    ) {
+      // limpa projeções antigas deste grupo (recalcula do zero)
+      await prisma.transaction.deleteMany({
+        where: {
+          userId,
+          installmentGroupId: groupPrefix,
+          externalId: { startsWith: "proj_" },
+          manuallyEdited: false,
+        },
+      });
+      const descNorm = (tx.description || "").replace(/\s+\d+\/\d+\s*$/, "").trim();
+      const baseMonth = shiftMonthKey(meta.billForecastDate, forecastOffset)!;
+      const [by, bm] = baseMonth.split("-").map(Number);
+      const dayOfPurchase = new Date(tx.date).getUTCDate();
+      for (let k = 1; k <= totalInstallments - currentInstallment; k++) {
+          const mIdxPre = (bm - 1) + k;
+          const fyPre = by + Math.floor(mIdxPre / 12);
+          const fmPre = (mIdxPre % 12) + 1;
+          // Só interessa parcelas futuras: faturas passadas já foram pagas/realizadas
+          const fcPre = `${fyPre}-${String(fmPre).padStart(2, "0")}`;
+          if (fcPre <= new Date().toISOString().slice(0, 7)) continue;
+        const mIdx = (bm - 1) + k;
+        const fy = by + Math.floor(mIdx / 12);
+        const fm = (mIdx % 12) + 1;
+        const fc = `${fy}-${String(fm).padStart(2, "0")}`;
+        const lastDay = new Date(Date.UTC(fy, fm, 0)).getUTCDate();
+        const projExternalId = `proj_${tx.id}_${currentInstallment + k}`;
+        await prisma.transaction.create({
+          data: {
+            description: `${descNorm} ${currentInstallment + k}/${totalInstallments} (prev.)`,
+            amount: resolveAmount(tx),
+            type: "EXPENSE",
+            date: new Date(Date.UTC(fy, fm - 1, Math.min(lastDay, dayOfPurchase), 12)),
+            person: ownerPerson || null,
+            isCreditCard: true,
+            paymentMethod: account.marketingName || account.name || "Cartão",
+            totalInstallments,
+            currentInstallment: currentInstallment + k,
+            installmentGroupId: groupPrefix,
+            billForecastMonth: fc,
+            pluggyAccountId: account.id,
+            source: "PLUGGY",
+            externalId: projExternalId,
+            categoryId,
+            userId,
+          },
+        });
+        result.transactionsCreated++;
+      }
+    }
     if (existing) {
       // Update sync-driven fields (keep the user's category edits). Rows the
       // user edited manually keep their values — no overwrite on re-sync.
@@ -824,6 +915,7 @@ async function syncCreditCard(
 
     await prisma.transaction.create({ data });
     result.transactionsCreated++;
+
   }
 }
 

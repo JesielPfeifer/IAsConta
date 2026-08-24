@@ -121,6 +121,79 @@ router.put("/:id", async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/bills/recurring — projeta as próximas ocorrências de uma conta
+// recorrente (ex.: financiamento do carro debitado dia 5) em "Contas a pagar".
+// Body: { name, amount, dayOfMonth, monthsAhead, person?, categoryId?,
+//         referenceMonthStart? ("YYYY-MM" — competência da 1ª parcela),
+//         currentInstallment?, totalInstallments? }
+// Idempotente: não duplica (name + dueDate iguais).
+router.post("/recurring", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    const b = req.body as {
+      name?: string; amount?: number; dayOfMonth?: number;
+      monthsAhead?: number; person?: string | null; categoryId?: string | null;
+      referenceMonthStart?: string | null;
+      currentInstallment?: number; totalInstallments?: number;
+    };
+    const name = String(b.name || "").trim();
+    const amount = Number(b.amount);
+    const day = Number(b.dayOfMonth);
+    const monthsAhead = Math.min(Math.max(Number(b.monthsAhead) || 12, 1), 60);
+    if (!name || !Number.isFinite(amount) || amount <= 0 || !(day >= 1 && day <= 31)) {
+      res.status(400).json({ error: "name, amount (>0) e dayOfMonth (1..31) são obrigatórios" });
+      return;
+    }
+
+    // Competência inicial: explícita ou mês seguinte ao corrente
+    let ry: number, rm: number;
+    if (b.referenceMonthStart && /^\d{4}-\d{2}$/.test(b.referenceMonthStart)) {
+      [ry, rm] = b.referenceMonthStart.split("-").map(Number);
+    } else {
+      const now = new Date();
+      const nxt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+      ry = nxt.getUTCFullYear(); rm = nxt.getUTCMonth() + 1;
+    }
+
+    const createdIds: string[] = [];
+    for (let k = 0; k < monthsAhead; k++) {
+      const mIdx = (rm - 1) + k;
+      const y = ry + Math.floor(mIdx / 12);
+      const mo = (mIdx % 12) + 1;
+      const lastDay = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+      const d = Math.min(day, lastDay);
+      const dueDate = new Date(Date.UTC(y, mo - 1, d, 12));
+
+      const dup = await prisma.bill.findFirst({
+        where: { userId: user.id, name, dueDate },
+      });
+      if (dup) continue;
+
+      const curInst = (b.currentInstallment ?? 1) + k;
+      const bill = await prisma.bill.create({
+        data: {
+          name,
+          amount,
+          dueDate,
+          isRecurring: true,
+          isPaid: false,
+          person: (b.person as any) ?? null,
+          categoryId: b.categoryId ?? null,
+          userId: user.id,
+          ...(b.totalInstallments && b.totalInstallments > 1
+            ? { currentInstallment: curInst, totalInstallments: b.totalInstallments }
+            : {}),
+        },
+      });
+      createdIds.push(bill.id);
+    }
+    res.status(201).json({ ok: true, created: createdIds.length });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
 router.delete("/:id", async (req: Request, res: Response) => {
   try {
     const user = req.user!;

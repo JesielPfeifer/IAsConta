@@ -20,6 +20,7 @@ export interface Transaction {
   isFixed?: boolean;
   isCreditCard?: boolean;
   billId?: string | null;
+  referenceMonth?: string | null;
 }
 
 interface Filters {

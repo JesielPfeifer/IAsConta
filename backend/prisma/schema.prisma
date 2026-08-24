@@ -61,6 +61,10 @@ model Transaction {
   // Marcado quando o usuário edita uma transação importada do Pluggy: o sync
   // passa a preservar os campos editados (não sobrescreve no re-sincronismo).
   manuallyEdited     Boolean         @default(false)
+  // Mês de competência ("YYYY-MM") editável pelo usuário: usado em relatórios
+  // quando a data do débito difere do mês a que a despesa se refere (ex.:
+  // prestação habitacional debitada em 05/08 referente a julho). Null = usa date.
+  referenceMonth     String?
   userId      String
   user        User            @relation(fields: [userId], references: [id])
   createdAt   DateTime        @default(now())

@@ -32,6 +32,7 @@ const createTransactionSchema = z.object({
 });
 
 const updateTransactionSchema = z.object({
+  referenceMonth: z.string().regex(/^\d{4}-\d{2}$/).nullable().optional(),
   amount: z.number().optional(),
   type: z.enum(["EXPENSE", "INCOME"]).optional(),
   description: z.string().min(1).optional(),
@@ -177,9 +178,15 @@ router.get("/", async (req: Request, res: Response) => {
         ...(Array.isArray(where.AND) ? where.AND : []),
         {
           OR: [
+            // Cartão: fatura informada pelo Pluggy
             { isCreditCard: true, billForecastMonth: month },
+            // Débito/crédito em conta com competência explícita (ex.:
+            // prestação de julho debitada em agosto) — vence o mês da data.
+            { referenceMonth: month },
+            // Demais lançamentos: mês civil da data
             {
               billForecastMonth: null,
+              referenceMonth: null,
               date: { gte: startOfMonth, lt: endOfMonth },
             },
           ],
@@ -248,9 +255,15 @@ router.put("/:id", async (req: Request, res: Response) => {
     }
 
     const updateData: Record<string, unknown> = { ...data };
-    if (data.date) {
-      updateData.date = new Date(data.date);
+    if (data.referenceMonth !== undefined) {
+      // Competência ("YYYY-MM") definida pelo usuário: mês a que a despesa se
+      // refere quando o débito caiu em outro mês (ex.: prestação de julho
+      // debitada em 05/08). null limpa (volta a competir pela data).
+      updateData.referenceMonth = data.referenceMonth;
     }
+    // Competência ("YYYY-MM") definida pelo usuário: mês a que a despesa se
+    // refere quando o débito caiu em outro mês (ex.: prestação de julho
+    // debitada em 05/08). Null limpa (volta a competir pela data).
     // Importada do Pluggy + editada pelo usuário → o sync não sobrescreve mais
     // esta linha no re-sincronismo (preserva correções de valor/data/etc.).
     if (existing.source === "PLUGGY") {
