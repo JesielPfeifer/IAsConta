@@ -146,6 +146,10 @@ model BankConnection {
   itemId       String?   @unique // Pluggy item id
   connectorId  Int?
   connectorName String?
+  // Human-friendly bank label (e.g. "Caixa", "Nubank") resolved from the real
+  // institution behind the item — for MeuPluggy proxy items the connector name
+  // is just "MeuPluggy" and says nothing about which bank it is.
+  bankLabel    String?
   status       String?          // Pluggy item status (LOGIN_OK, LOGIN_ERROR, ...)
   lastSyncAt   DateTime?
   errorMessage String?
