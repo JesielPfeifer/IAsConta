@@ -607,6 +607,20 @@ async function syncBankAccount(
 // ---------------------------------------------------------------
 // Credit card accounts -> faturas (Bills) + purchases (Transactions)
 // ---------------------------------------------------------------
+/**
+ * Ajustes de financiamento/renegociação que o banco lista fora das compras
+ * (bloco "Pagamentos e Financiamentos" da fatura): encerramento de dívida,
+ * estornos de juros etc. Não são compras — não devem virar transação.
+ * Comparação sem acentos (Pluggy pode mandar "í" composto ou decomposto).
+ */
+function isFinancingAdjustment(description: string | null | undefined): boolean {
+  const n = (description || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return n.includes("encerramento de divida") || n.includes("estorno de juros");
+}
+
 async function syncCreditCard(
   client: ReturnType<typeof createPluggyClient>,
   account: PluggyAccount,
@@ -668,6 +682,23 @@ async function syncCreditCard(
     // duplicates once POSTED); only the invoice-balance marker is skipped.
     if (isInvoiceBalanceMarker(tx)) continue;
 
+    // Ajustes de financiamento ("Encerramento de dívida", estornos de juros)
+    // fazem parte do bloco de pagamentos/renegociação da fatura, não das
+    // compras — pular na importação e remover fantasmas de imports antigos
+    // (preservando linhas editadas pelo usuário).
+    if (isFinancingAdjustment(tx.description)) {
+      const ghost = await prisma.transaction.findUnique({
+        where: { userId_externalId: { userId, externalId: tx.id } },
+      });
+      if (ghost && !ghost.manuallyEdited) {
+        await prisma.transaction.delete({ where: { id: ghost.id } });
+        logger.info(
+          `[pluggy-sync] ajuste de financiamento não é compra; removida linha importada: ${tx.description} (${tx.id})`
+        );
+      }
+      continue;
+    }
+
     // CREDIT rows on the card account are bill payments (skipped below when
     // they match a known fatura) or REFUNDS/estornos. Refunds must NOT be
     // stored as positive expenses (they would inflate the card total), so
@@ -681,6 +712,18 @@ async function syncCreditCard(
         if (legacy) {
           await prisma.transaction.delete({ where: { id: legacy.id } });
           logger.info(`[pluggy-sync] removido pagamento de fatura legado: ${tx.description} (${tx.id})`);
+        }
+      } else {
+        // Crédito não-pagamento (estorno/ajuste): nunca deve existir como
+        // despesa. Remove linhas fantasma de imports antigos que gravavam
+        // créditos como EXPENSE positiva (inflavam a fatura). Linhas editadas
+        // pelo usuário são preservadas.
+        const ghost = await prisma.transaction.findUnique({
+          where: { userId_externalId: { userId, externalId: tx.id } },
+        });
+        if (ghost && !ghost.manuallyEdited && ghost.type === "EXPENSE") {
+          await prisma.transaction.delete({ where: { id: ghost.id } });
+          logger.info(`[pluggy-sync] removido crédito legado importado como despesa: ${tx.description} (${tx.id})`);
         }
       }
       continue;
