@@ -16,6 +16,7 @@ interface PaymentMethod {
 }
 
 interface TransactionFormData {
+  referenceMonth?: string | null;
   amount: number;
   description: string;
   type: 'EXPENSE' | 'INCOME';
@@ -74,6 +75,7 @@ export default function TransactionForm({ transaction, onSave, onClose }: Props)
     categoryId: transaction?.categoryId ?? transaction?.category?.id ?? '',
     person: normPerson(transaction?.person || ''),
     date: transaction?.date ? dayjs(transaction.date).format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD'),
+    referenceMonth: (transaction as any)?.referenceMonth || null as string | null,
     isShared: transaction?.isShared ?? false,
     paymentMethod: transaction?.paymentMethod ?? '',
     totalInstallments: transaction?.totalInstallments ?? 1,
@@ -163,7 +165,12 @@ export default function TransactionForm({ transaction, onSave, onClose }: Props)
             <div>
               <label className="block text-sm font-medium text-gray-400 mb-1">Data</label>
               <input type="date" value={form.date} onChange={(e) => updateField('date', e.target.value)} required className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50" />
-            </div>
+
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Mês de competência (opcional)</label>
+              <input type="month" value={(form.referenceMonth as string) || ''} onChange={(e) => updateField('referenceMonth', e.target.value || null)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50" />
+              <p className="text-[11px] text-gray-600 mt-0.5">Use quando o débito caiu num mês mas a conta é de outro (ex.: prestação de jul debitada em ago).</p>
+            </div>            </div>
           </div>
 
           {isExpense && (

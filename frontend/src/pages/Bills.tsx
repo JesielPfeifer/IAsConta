@@ -9,6 +9,7 @@ import dayjs from 'dayjs';
 interface Bill {
   id: string;
   name: string;
+  source?: 'MANUAL' | 'PLUGGY' | string;
   amount: number;
   dueDate: string;
   isRecurring: boolean;
@@ -71,8 +72,16 @@ function CustomSelect({ value, onChange, options, icon: Icon }: {
   );
 }
 
+interface ForecastCard {
+  paymentMethod: string;
+  total: number;
+  count: number;
+  officialAmount?: number | null;
+}
+
 export default function Bills() {
   const [bills, setBills] = useState<Bill[]>([]);
+  const [forecasts, setForecasts] = useState<ForecastCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [monthFilter, setMonthFilter] = useState(dayjs().month() + 1);
@@ -174,7 +183,9 @@ export default function Bills() {
     loadBills();
   }
 
-  const filteredBills = bills.filter((b) => {
+  // Faturas previstas do mês (cartões) — enquanto a oficial não é publicada
+
+const filteredBills = bills.filter((b) => {
     const billMonth = dayjs(b.dueDate).month() + 1;
     const billYear = dayjs(b.dueDate).year();
     return billMonth === monthFilter && billYear === yearFilter;
@@ -306,7 +317,20 @@ export default function Bills() {
                   </tr>
                 </thead>
                 <tbody>
-                  {[...pending, ...paid].map((b) => {
+                  {forecasts.length > 0 && (
+        <div className="mb-6 grid gap-3 md:grid-cols-2">
+          {forecasts.map((f: ForecastCard) => (
+            <div key={f.paymentMethod} className="rounded-2xl bg-amber-500/5 border border-amber-500/20 p-4 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-amber-300">Fatura prevista — {f.paymentMethod}</p>
+                <p className="text-xs text-gray-500">{f.count} lançamentos · oficial ainda não publicada pelo banco</p>
+              </div>
+              <span className="text-lg font-semibold text-amber-200">{formatCurrency(f.total)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {[...pending, ...paid].map((b) => {
                     const isOverdue = !b.isPaid && dayjs(b.dueDate).isBefore(dayjs(), 'day');
                     const isSelected = selected.has(b.id);
                     const isEditing = editingAmount?.id === b.id;
