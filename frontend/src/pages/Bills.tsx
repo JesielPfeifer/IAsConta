@@ -226,6 +226,19 @@ const filteredBills = bills.filter((b) => {
   const overdue = pending.filter((b) => dayjs(b.dueDate).isBefore(dayjs(), 'day'));
 
   const totalPending = pending.reduce((sum, b) => sum + b.amount, 0);
+
+  // Faturas previstas do mês filtrado (oficial ainda não publicada): entram no
+  // Total Pendente para o planejamento bater com a realidade do mês.
+  const forecastKey = `${yearFilter}-${String(monthFilter).padStart(2, '0')}`;
+  const hasOfficialFor = (pm: string) => bills.some(
+    (b) => b.source === 'PLUGGY'
+      && dayjs(b.dueDate).format('YYYY-MM') === forecastKey
+      && b.name.toLowerCase().includes(String(pm).toLowerCase())
+  );
+  const monthForecasts = forecasts.filter(
+    (f: ForecastCard) => f.month === forecastKey && !hasOfficialFor(f.paymentMethod)
+  );
+  const totalForecast = monthForecasts.reduce((sum: number, f: ForecastCard) => sum + (f.total || 0), 0);
   const totalPaid = paid.reduce((sum, b) => sum + b.amount, 0);
 
   const deleteMessage = Array.isArray(deleteTarget) && deleteTarget.length > 1
@@ -280,8 +293,15 @@ const filteredBills = bills.filter((b) => {
               <p className="text-sm text-gray-400">Total Pendente</p>
               <Clock className="w-4 h-4 text-yellow-400/70" />
             </div>
-            <p className="text-2xl font-bold text-yellow-400">{formatCurrency(totalPending)}</p>
-            <p className="text-xs text-gray-500 mt-1">{pending.length} conta(s)</p>
+            <p className="text-2xl font-bold text-yellow-400">
+              {formatCurrency(totalPending + totalForecast)}
+              {totalForecast > 0 && (
+                <span className="block text-xs font-normal text-amber-400/80 mt-1">
+                  inclui {formatCurrency(totalForecast)} de fatura(s) prevista(s)
+                </span>
+              )}
+            </p>
+            <p className="text-xs text-gray-500 mt-1">{pending.length} conta(s){monthForecasts.length > 0 ? ` + ${monthForecasts.length} fatura(s) prevista(s)` : ''}</p>
           </div>
         </div>
         <div className="relative bg-gray-900/50 border border-white/5 rounded-2xl p-5 overflow-hidden hover:border-white/10 transition-colors duration-200">
