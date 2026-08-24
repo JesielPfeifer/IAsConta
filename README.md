@@ -1,5 +1,11 @@
 # IAsConta
 
+<p align="center">
+  <img src="frontend/public/mascote.svg" alt="Mascote do IAsConta — duas moedas e um robô sorridente" width="180" />
+</p>
+<h1 align="center">IAsConta</h1>
+<p align="center"><em>"— E as conta?" "— A IA resolve." 💬</em></p>
+
 Finanças pessoais para casais, com inteligência artificial integrada ao WhatsApp e Open Finance.
 
 > O IAsConta nasceu como um experimento de **engenharia agêntica**: uma aplicação completa — do planejamento ao deploy — construída ponta a ponta por agentes de IA orquestrados pelo [Hermes Agent](https://hermes-agent.nousresearch.com), com revisão de código automatizada (CodeRabbit) e deploy contínuo num homelab exposto via Cloudflare Tunnel.
