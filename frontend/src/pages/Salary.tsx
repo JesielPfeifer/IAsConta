@@ -110,6 +110,8 @@ export default function Salary() {
   const [valeRefeicao, setValeRefeicao] = useState('');
   const [planoSaude, setPlanoSaude] = useState('');
   const [outrosDescontosFixos, setOutrosDescontosFixos] = useState('');
+  const [inssOverride, setInssOverride] = useState('');
+  const [irrfOverride, setIrrfOverride] = useState('');
   const [customDiscounts, setCustomDiscounts] = useState<CustomDiscount[]>([]);
   const [nextId, setNextId] = useState(1);
 
@@ -135,9 +137,13 @@ export default function Salary() {
     const totalAdicionais = round2(trienioVal + periVal + noturnoVal + heVal + comissaoVal + outrosVal);
     const grossSalaryTotal = round2(base + totalAdicionais);
 
-    const inss = round2(calcINSS(grossSalaryTotal));
+    const inssAuto = round2(calcINSS(grossSalaryTotal));
+    const inssManual = inssOverride.trim() !== '';
+    const inss = inssManual ? Math.max(0, round2(parseNumber(inssOverride))) : inssAuto;
     const irrfBase = round2(grossSalaryTotal - inss);
-    const irrf = round2(Math.max(0, calcIRRF(irrfBase)));
+    const irrfAuto = round2(Math.max(0, calcIRRF(irrfBase)));
+    const irrfManual = irrfOverride.trim() !== '';
+    const irrf = irrfManual ? Math.max(0, round2(parseNumber(irrfOverride))) : irrfAuto;
     const vt = round2(parseNumber(valeTransporte));
     const vr = round2(parseNumber(valeRefeicao));
     const ps = round2(parseNumber(planoSaude));
@@ -160,7 +166,9 @@ export default function Salary() {
       totalAdicionais,
       grossSalaryTotal,
       inss,
+      inssManual,
       irrf,
+      irrfManual,
       irrfBase,
       vt,
       vr,
@@ -183,6 +191,8 @@ export default function Salary() {
     planoSaude,
     outrosDescontosFixos,
     customDiscounts,
+    inssOverride,
+    irrfOverride,
   ]);
 
   const additions = [
@@ -195,8 +205,8 @@ export default function Salary() {
   ].filter((a) => a.value > 0);
 
   const deductions = [
-    { name: 'INSS', detail: inssRateLabel(calc.grossSalaryTotal), value: calc.inss },
-    { name: 'IRRF', detail: irrfRateLabel(calc.irrfBase), value: calc.irrf },
+    { name: 'INSS', detail: calc.inssManual ? 'Manual' : inssRateLabel(calc.grossSalaryTotal), value: calc.inss },
+    { name: 'IRRF', detail: calc.irrfManual ? 'Manual' : irrfRateLabel(calc.irrfBase), value: calc.irrf },
     { name: 'Vale Transporte', detail: '-', value: calc.vt },
     { name: 'Vale Refeicao', detail: '-', value: calc.vr },
     { name: 'Plano de Saude', detail: '-', value: calc.ps },
@@ -304,6 +314,14 @@ export default function Salary() {
                   <SectionHeader title="Descontos" sectionKey="descontos" open={openSections.descontos} onToggle={toggleSection} icon={<TrendingDown className="w-4 h-4" />} />
                   {openSections.descontos && (
                     <div className="pb-4 pt-1 space-y-4">
+                      <div>
+                        <Field label="INSS" value={inssOverride} onChange={setInssOverride} placeholder="Automático" />
+                        <p className="text-xs text-gray-500 mt-1">Vazio = calcula pelas faixas · digite p/ sobrescrever (0 = isento)</p>
+                      </div>
+                      <div>
+                        <Field label="IRRF" value={irrfOverride} onChange={setIrrfOverride} placeholder="Automático" />
+                        <p className="text-xs text-gray-500 mt-1">Vazio = tabela progressiva · digite p/ sobrescrever (0 = isento)</p>
+                      </div>
                       <Field label="Vale Transporte" value={valeTransporte} onChange={setValeTransporte} />
                       <Field label="Vale Refeicao" value={valeRefeicao} onChange={setValeRefeicao} />
                       <Field label="Plano de Saude" value={planoSaude} onChange={setPlanoSaude} />
