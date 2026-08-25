@@ -5,6 +5,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Transactions from './pages/Transactions';
 import Bills from './pages/Bills';
+import Income from './pages/Income';
 import Goals from './pages/Goals';
 import Investments from './pages/Investments';
 import Salary from './pages/Salary';
@@ -39,6 +40,7 @@ export default function App() {
         <Route index element={<Dashboard />} />
         <Route path="transactions" element={<Transactions />} />
         <Route path="bills" element={<Bills />} />
+        <Route path="income" element={<Income />} />
         <Route path="goals" element={<Goals />} />
         <Route path="investments" element={<Investments />} />
         <Route path="salary" element={<Salary />} />

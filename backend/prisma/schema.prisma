@@ -30,6 +30,7 @@ model User {
   bankConnections BankConnection[]
   paymentMethods  PaymentMethod[]
   fixedIncomes    FixedIncome[]
+  incomeEntries    IncomeEntry[]
 }
 
 model Transaction {
@@ -83,6 +84,7 @@ model Category {
   transactions Transaction[]
   budgets      Budget[]
   bills        Bill[]
+  incomeEntries IncomeEntry[]
 }
 
 model Bill {
@@ -110,6 +112,29 @@ model Bill {
   createdAt         DateTime  @default(now())
 
   @@unique([userId, externalId])
+}
+
+model IncomeEntry {
+  id                String    @id @default(uuid())
+  name              String
+  amount            Float
+  dueDate           DateTime
+  isRecurring       Boolean   @default(false)
+  isReceived        Boolean   @default(false)
+  isShared          Boolean   @default(false)
+  person            Person?
+  categoryId        String?
+  category          Category? @relation(fields: [categoryId], references: [id])
+  totalInstallments Int       @default(1)
+  currentInstallment Int      @default(1)
+  source            Source    @default(MANUAL)
+  manuallyEdited    Boolean   @default(false)
+  userId            String
+  user              User      @relation(fields: [userId], references: [id])
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([userId, dueDate])
 }
 
 model Budget {
