@@ -5,7 +5,7 @@ import FileImport from '../components/FileImport';
 import ConfirmModal from '../components/ConfirmModal';
 import { api, DATA_CHANGED_EVENT } from '../api/client';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
-import { Plus, Upload, Pencil, Trash2, Search, Check, X, ChevronDown, Calendar, Filter, Users, CreditCard, ArrowUpDown, type LucideIcon } from 'lucide-react';
+import { Plus, Upload, Pencil, Trash2, Search, Check, X, ChevronDown, Calendar, Filter, Users, CreditCard, ArrowUpDown, TrendingUp, type LucideIcon } from 'lucide-react';
 import dayjs from 'dayjs';
 
 function formatCurrency(value: number) {
@@ -115,10 +115,15 @@ export default function Transactions() {
     const ehTransferencia = (t: Transaction) => /transfer|pix|ted/.test(desc(t));
     const ehCasal = (t: Transaction) => /eduarda|jesiel/.test(desc(t)) || t.person === 'WIFE';
     const casal = filtered.filter((t) => t.type === 'EXPENSE' && ehTransferencia(t) && ehCasal(t));
+    const receitas = filtered
+      .filter((t) => t.type === 'INCOME')
+      .slice()
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     return {
       cartões: Object.entries(cartões).sort((a, b) => b[1].total - a[1].total),
       formas: Object.entries(formas).sort((a, b) => b[1].total - a[1].total),
       casal,
+      receitas,
     };
   }, [filtered]);
 
@@ -134,6 +139,12 @@ export default function Transactions() {
       const name = key.slice(3);
       const list = filtered.filter((t) => t.type === 'EXPENSE' && !t.isCreditCard && (t.paymentMethod ? t.paymentMethod.toUpperCase() : 'DINHEIRO') === name);
       return list.slice().sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }
+    if (key.startsWith('rec-')) {
+      return filtered
+        .filter((t) => t.type === 'INCOME')
+        .slice()
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     }
     return [];
   };
@@ -330,7 +341,7 @@ export default function Transactions() {
         </div>
       </div>
 
-      {(grouped.cartões.length > 0 || grouped.formas.length > 0 || grouped.casal.length > 0) && (
+      {(grouped.cartões.length > 0 || grouped.formas.length > 0 || grouped.casal.length > 0 || grouped.receitas.length > 0) && (
         <div className="space-y-4">
           <div className="space-y-3">
             {cardCycles.map((c, i) => {
@@ -574,6 +585,93 @@ export default function Transactions() {
               );
             })}
           </div>
+          {grouped.receitas.length > 0 && (
+            <div className="space-y-3">
+              {(() => {
+                const key = 'rec-todas';
+                const open = expandedGroups.has(key);
+                const ativo = groupFilter === key;
+                const total = grouped.receitas.reduce((sum, t) => sum + Math.abs(t.amount), 0);
+                return (
+              <div key={key} className={`relative bg-gray-900/50 border rounded-2xl p-4 overflow-hidden transition-all duration-200 ${ativo ? 'border-emerald-500/40 ring-1 ring-emerald-500/20' : 'border-white/5'}`}>
+                <div className="absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent pointer-events-none" />
+                <button
+                  onClick={() => {
+                    setExpandedGroups((prev) => {
+                      if (prev.has(key)) return new Set([]);
+                      return new Set([key]);
+                    });
+                    setGroupFilter((f) => (ativo ? null : key));
+                  }}
+                  className="relative w-full flex items-center justify-between text-left gap-3 group"
+                >
+                  <span className="flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-emerald-300" />
+                    <span className="text-sm font-semibold text-white uppercase tracking-wide">Receitas</span>
+                    <span className="text-[10px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-1.5 py-0.5 rounded-full">Entradas</span>
+                  </span>
+                  <span className="flex items-center gap-3">
+                    <span className="text-right">
+                      <span className="block text-base font-bold text-emerald-400">{formatCurrency(total)}</span>
+                      <span className="block text-[11px] text-gray-500">{grouped.receitas.length} lançamento(s)</span>
+                    </span>
+                    <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+                  </span>
+                </button>
+                {open && (
+                  <div className="relative overflow-x-auto mt-3 pt-3 border-t border-white/[0.06]" style={{ animation: 'dropExpand 0.3s cubic-bezier(.22,.9,.32,1) both' }}>
+                    {groupTxs(key).length === 0 ? (
+                      <p className="text-gray-500 text-sm py-3">Nenhum lançamento neste filtro</p>
+                    ) : (
+                      <table className="w-full text-sm min-w-[720px]">
+                        <thead>
+                          <tr className="text-left text-gray-400 border-b border-white/5">
+                            <th className="px-3 py-2 w-8"></th>
+                            <th className="px-3 py-2 font-medium">Data</th>
+                            <th className="px-3 py-2 font-medium">Descrição</th>
+                            <th className="px-3 py-2 font-medium">Categoria</th>
+                            <th className="px-3 py-2 font-medium">Origem</th>
+                            <th className="px-3 py-2 font-medium">Pessoa</th>
+                            <th className="px-3 py-2 font-medium text-right">Valor</th>
+                            <th className="px-3 py-2 font-medium text-right">Ações</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {groupTxs(key).map((t) => (
+                            <tr key={t.id} className="border-b border-white/[0.03] transition-colors duration-150 hover:bg-white/[0.02]">
+                              <td className="px-3 py-2">
+                                <input type="checkbox" checked={selected.has(t.id)} onChange={() => toggleSelect(t.id)} className="w-4 h-4 accent-emerald-500 cursor-pointer" />
+                              </td>
+                              <td className="px-3 py-2 text-gray-400">{dayjs(t.date).format('DD/MM/YYYY')}</td>
+                              <td className="px-3 py-2 text-white">{t.description}</td>
+                              <td className="px-3 py-2">
+                                {t.categoryName ? (
+                                  <span className="inline-flex px-2 py-0.5 rounded-full text-xs bg-white/5 text-gray-300">{t.categoryName}</span>
+                                ) : (
+                                  <span className="text-gray-500">-</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-gray-400">{t.source || '-'}</td>
+                              <td className="px-3 py-2 text-gray-400">{personLabel[t.person || ''] || t.person}</td>
+                              <td className="px-3 py-2 text-right font-medium text-emerald-400">+{formatCurrency(Math.abs(t.amount))}</td>
+                              <td className="px-3 py-2 text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <button onClick={() => handleEdit(t)} className="p-1.5 hover:bg-white/5 rounded-lg text-gray-400 hover:text-white transition-colors" title="Editar"><Pencil className="w-4 h-4" /></button>
+                                  <button onClick={() => handleDeleteRequest(t.id)} className="p-1.5 hover:bg-red-500/10 rounded-lg text-gray-400 hover:text-red-400 transition-colors" title="Remover"><Trash2 className="w-4 h-4" /></button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                )}
+              </div>
+                );
+              })()}
+            </div>
+          )}
 
           {grouped.casal.length > 0 && (
             <div className="relative bg-gray-900/50 border border-white/5 rounded-2xl p-4 overflow-hidden">
