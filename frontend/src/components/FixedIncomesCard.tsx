@@ -35,7 +35,7 @@ function formatCurrency(value: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 }
 
-export default function FixedIncomesCard() {
+export default function FixedIncomesCard({ className = '' }: { className?: string }) {
   const [incomes, setIncomes] = useState<FixedIncome[]>([]);
   const [loading, setLoading] = useState(true);
   const [newName, setNewName] = useState('');
@@ -151,7 +151,7 @@ export default function FixedIncomesCard() {
   const total = incomes.filter((i) => i.active).reduce((s, i) => s + i.amount, 0);
 
   return (
-    <section className="bg-gray-900/80 backdrop-blur-sm border border-white/5 rounded-2xl bg-gradient-to-b from-white/[0.02] to-transparent shadow-xl shadow-black/20 overflow-hidden">
+    <section className={`bg-gray-900/80 backdrop-blur-sm border border-white/5 rounded-2xl bg-gradient-to-b from-white/[0.02] to-transparent shadow-xl shadow-black/20 overflow-hidden ${className}`}>
       <div className="flex items-center gap-2.5 px-5 py-4 border-b border-white/5">
         <Repeat className="w-4 h-4 text-emerald-400" />
         <h2 className="text-sm font-semibold text-white uppercase tracking-wide">Rendas Fixas Mensais</h2>

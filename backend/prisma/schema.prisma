@@ -66,6 +66,13 @@ model Transaction {
   // quando a data do débito difere do mês a que a despesa se refere (ex.:
   // prestação habitacional debitada em 05/08 referente a julho). Null = usa date.
   referenceMonth     String?
+  // Soft-delete: exclusão de transação importada do Pluggy vira "ocultar" em
+  // vez de apagar a linha. Mantém o @@unique([userId, externalId]) íntegro — o
+  // sync encontra a linha oculta pelo externalId e PULA a reimportação,
+  // respeitando a exclusão do usuário. Ocultas somem de todas as listas
+  // (isHidden=false) e podem ser revisadas/restauradas na aba "Ocultas".
+  isHidden           Boolean         @default(false)
+  hiddenAt           DateTime?
   userId      String
   user        User            @relation(fields: [userId], references: [id])
   createdAt   DateTime        @default(now())

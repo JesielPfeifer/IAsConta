@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Wallet, Calculator, TrendingDown, TrendingUp, Receipt, Plus, Trash2, ChevronDown, Check } from 'lucide-react';
 import { api } from '../api/client';
 import dayjs from 'dayjs';
 import FixedIncomesCard from '../components/FixedIncomesCard';
+import { useOnboarding } from '../hooks/useOnboarding';
 import 'dayjs/locale/pt-br';
 
 dayjs.locale('pt-br');
@@ -65,6 +66,18 @@ interface CustomDiscount {
   amount: string;
 }
 
+interface FixedIncomeRow {
+  id: string;
+  name: string;
+  amount: number;
+}
+
+// Nomes aceitos como "o salário" já cadastrado na lista de rendas fixas
+// (legado e atuais) — permite atualizar em vez de duplicar.
+const SALARIO_NAME_REGEX = /^sal[áa]rio\s+l[íi]quido/i;
+
+const SALARY_INCOME_NAME = 'Salário Líquido';
+
 const inputClass =
   'w-full bg-gray-900/60 border border-white/5 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/30 transition-all duration-200 placeholder-gray-600';
 
@@ -99,6 +112,13 @@ function SectionHeader({ title, sectionKey, open, onToggle, icon }: { title: str
 }
 
 export default function Salary() {
+  // ── Onboarding interativo (primeira visita) ──
+  useOnboarding('salary', [
+    { target: '.iasconta-salary-form', title: 'Cálculo automático', description: 'Preencha salário base, adicionais e descontos: INSS e IRRF são calculados automaticamente pelas tabelas vigentes, e o líquido atualiza em tempo real.' },
+    { target: '.iasconta-tax-overrides', title: 'Alíquotas editáveis', description: 'Deixe INSS/IRRF vazios para usar o cálculo automático ou digite um valor para sobrescrever (0 marca como isento).' },
+    { target: '.iasconta-fixed-incomes', title: 'Rendas fixas mensais', description: 'Cadastre aqui os salários/recorrentes de cada pessoa do casal — eles alimentam o acompanhamento mensal.' },
+  ]);
+
   const [baseSalary, setBaseSalary] = useState('');
   const [trienio, setTrienio] = useState('');
   const [periculosidade, setPericulosidade] = useState('');
@@ -124,6 +144,28 @@ export default function Salary() {
   const [registering, setRegistering] = useState(false);
   const [registered, setRegistered] = useState(false);
   const [registerError, setRegisterError] = useState('');
+  const [fixedIncomes, setFixedIncomes] = useState<FixedIncomeRow[]>([]);
+
+  // Lista de rendas fixas já cadastradas — usada para atualizar "Salário
+  // líquido" existente em vez de criar duplicatas a cada clique.
+  const loadFixedIncomes = useCallback(async () => {
+    try {
+      const data = await api('/api/fixed-incomes');
+      setFixedIncomes(Array.isArray(data) ? data : []);
+    } catch {
+      setFixedIncomes([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadFixedIncomes();
+  }, [loadFixedIncomes]);
+
+  const existingSalaryIncome = useMemo(
+    () =>
+      fixedIncomes.find((fi) => SALARIO_NAME_REGEX.test((fi.name || '').trim())),
+    [fixedIncomes],
+  );
 
   const calc = useMemo(() => {
     const base = parseNumber(baseSalary);
@@ -242,19 +284,25 @@ export default function Salary() {
     setRegistered(false);
     setRegisterError('');
     try {
-      await api('/api/transactions', {
-        method: 'POST',
-        body: JSON.stringify({
-          amount: calc.netSalary,
-          type: 'INCOME',
-          description: `Salario Liquido - ${dayjs().format('MMMM YYYY')}`,
-          date: new Date().toISOString(),
-          person: 'COUPLE',
-          isShared: true,
-          source: 'MANUAL',
-          categoryId: null,
-        }),
+      // Registra como RENDA FIXA (recorrente), não como transação avulsa:
+      // o valor entra todo mês via "Lançar rendas no mês" (FixedIncomesCard).
+      const payload = JSON.stringify({
+        name: SALARY_INCOME_NAME,
+        amount: calc.netSalary,
+        person: 'COUPLE',
       });
+      if (existingSalaryIncome) {
+        await api(`/api/fixed-incomes/${existingSalaryIncome.id}`, {
+          method: 'PUT',
+          body: payload,
+        });
+      } else {
+        await api('/api/fixed-incomes', {
+          method: 'POST',
+          body: payload,
+        });
+      }
+      await loadFixedIncomes();
       setRegistered(true);
       setTimeout(() => setRegistered(false), 3000);
     } catch (err) {
@@ -278,7 +326,7 @@ export default function Salary() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1">
-          <div className="lg:sticky lg:top-6 space-y-4">
+          <div className="lg:sticky lg:top-6 space-y-4 iasconta-salary-form">
             <div className="bg-gray-900/80 backdrop-blur-sm border border-white/5 rounded-2xl bg-gradient-to-b from-white/[0.02] to-transparent shadow-xl shadow-black/20 overflow-hidden">
               <div className="flex items-center gap-2.5 px-5 pt-4 pb-2 border-b border-white/5">
                 <Calculator className="w-4 h-4 text-emerald-400" />
@@ -313,7 +361,7 @@ export default function Salary() {
                 <div>
                   <SectionHeader title="Descontos" sectionKey="descontos" open={openSections.descontos} onToggle={toggleSection} icon={<TrendingDown className="w-4 h-4" />} />
                   {openSections.descontos && (
-                    <div className="pb-4 pt-1 space-y-4">
+                    <div className="pb-4 pt-1 space-y-4 iasconta-tax-overrides">
                       <div>
                         <Field label="INSS" value={inssOverride} onChange={setInssOverride} placeholder="Automático" />
                         <p className="text-xs text-gray-500 mt-1">Vazio = calcula pelas faixas · digite p/ sobrescrever (0 = isento)</p>
@@ -511,7 +559,7 @@ export default function Salary() {
               }`}
             >
               {registered ? (
-                <><Check className="w-4 h-4" /> Renda Cadastrada</>
+                <><Check className="w-4 h-4" /> Renda Fixa Cadastrada</>
               ) : registering ? (
                 <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Cadastrando...</>
               ) : (
@@ -521,12 +569,12 @@ export default function Salary() {
             {registerError && <p className="text-sm text-red-400">{registerError}</p>}
             {!registerError && !registered && (
               <p className="text-xs text-gray-500">
-                Registra o salário líquido de {formatCurrency(calc.netSalary)} como receita do casal em {dayjs().format('MMMM YYYY')}.
+                Salva o salário líquido de {formatCurrency(calc.netSalary)} como renda fixa do casal — entra todo mês ao clicar em “Lançar rendas no mês”.
               </p>
             )}
           </div>
 
-          <FixedIncomesCard />
+          <FixedIncomesCard className="iasconta-fixed-incomes" />
         </div>
       </div>
     </div>

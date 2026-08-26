@@ -86,7 +86,7 @@ router.get("/card-cycle", async (req: Request, res: Response) => {
     // aparece UMA vez na UI, independente de ter transações Pluggy, manuais ou
     // ambas.
     const pmRows = await prisma.transaction.findMany({
-      where: { userId: user.id, isCreditCard: true },
+      where: { userId: user.id, isCreditCard: true, isHidden: false },
       select: { pluggyAccountId: true, paymentMethod: true },
       distinct: ["paymentMethod"],
     });
@@ -113,6 +113,7 @@ router.get("/card-cycle", async (req: Request, res: Response) => {
         where: {
           userId: user.id,
           isCreditCard: true,
+          isHidden: false,
           paymentMethod: pm,
           OR: [
             { billForecastMonth: monthKey },
@@ -161,9 +162,14 @@ router.get("/card-cycle", async (req: Request, res: Response) => {
 router.get("/", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
-    const { month, categoryId, person, type, source, isShared, paymentMethod } = req.query;
+    const { month, categoryId, person, type, source, isShared, paymentMethod, hidden } = req.query;
 
     const where: Record<string, unknown> = { userId: user.id };
+
+    // ?hidden=true lista APENAS as ocultas (aba "Ocultas" da UI). Sem o
+    // parâmetro (ou hidden=false), ocultas ficam de fora — exclusão do
+    // usuário não pode ressuscitar na listagem normal nem nos totais.
+    where.isHidden = hidden === "true";
 
     if (month) {
       const startOfMonth = new Date(`${month}-01T00:00:00.000Z`);
@@ -208,6 +214,51 @@ router.get("/", async (req: Request, res: Response) => {
     });
 
     res.json(transactions);
+  } catch (err) {
+    logger.error(err);
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+router.get("/hidden", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    // Lista explícita das ocultas (mesma forma da listagem normal, mas
+    // isHidden=true). A aba "Ocultas" usa esta rota para revisar/restaurar.
+    const transactions = await prisma.transaction.findMany({
+      where: { userId: user.id, isHidden: true },
+      include: { category: true },
+      orderBy: { hiddenAt: "desc" },
+    });
+    res.json(transactions);
+  } catch (err) {
+    logger.error(err);
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+router.post("/hidden/:id/restore", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    const { id } = req.params;
+
+    const existing = await prisma.transaction.findFirst({
+      where: { id: id as string, userId: user.id, isHidden: true },
+    });
+
+    if (!existing) {
+      res.status(404).json({ error: "Transação oculta não encontrada" });
+      return;
+    }
+
+    // Restaurar = voltar à lista normal. Se a transação ainda existir no
+    // Pluggy, o sync volta a atualizá-la normalmente (dedupe por externalId).
+    await prisma.transaction.update({
+      where: { id: existing.id },
+      data: { isHidden: false, hiddenAt: null },
+    });
+
+    res.json({ message: "Transação restaurada" });
   } catch (err) {
     logger.error(err);
     res.status(500).json({ error: "Erro interno" });
@@ -325,6 +376,25 @@ router.put("/:id", async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Escopo de "ocultar em grupo" para uma transação: quando ela pertence a uma
+ * série de parcelas, TODAS as parcelas da série são ocultadas junto (mesma
+ * semântica da exclusão física de parceladas). Caso contrário, apenas a linha.
+ */
+function buildHiddenScopeWhere(
+  existing: { installmentGroupId: string | null; totalInstallments: number },
+  userId: string
+): Record<string, unknown> {
+  if (existing.installmentGroupId) {
+    return {
+      userId,
+      installmentGroupId: existing.installmentGroupId,
+      source: "PLUGGY",
+    };
+  }
+  return { userId, id: existing.id };
+}
+
 router.delete("/:id", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
@@ -339,6 +409,19 @@ router.delete("/:id", async (req: Request, res: Response) => {
       // 404 em exclusões em lote/parceladas, onde a exclusão em cascata de uma
       // parcela já removeu as irmãs selecionadas.
       res.json({ message: "Transação já removida" });
+      return;
+    }
+
+    // Transações importadas do Pluggy (e projeções de parcelas geradas pelo
+    // sync) NÃO são apagadas fisicamente: viram "ocultas" (soft-delete). O
+    // externalId continua no banco, então o próximo sync encontra a linha e
+    // PULA a reimportação — a exclusão do usuário sobrevive ao re-sincronismo.
+    if (existing.source === "PLUGGY") {
+      await prisma.transaction.updateMany({
+        data: { isHidden: true, hiddenAt: new Date() },
+        where: buildHiddenScopeWhere(existing, user.id),
+      });
+      res.json({ message: "Transação removida" });
       return;
     }
 

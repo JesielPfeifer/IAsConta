@@ -3,6 +3,7 @@ import { QrCode, CheckCircle2, Loader2, RefreshCw, Power, Smartphone, Save, User
 import { api } from '../api/client';
 import PluggySettingsCard from '../components/PluggySettingsCard';
 import PaymentMethodsCard from '../components/PaymentMethodsCard';
+import { useOnboarding } from '../hooks/useOnboarding';
 
 interface UserSettings {
   groqApiKey: string;
@@ -33,6 +34,13 @@ const EMPTY: UserSettings = {
 };
 
 export default function Setup() {
+
+  // ── Onboarding interativo (primeira visita) ──
+  useOnboarding('setup', [
+    { target: '#pluggy-client-id', title: 'Conexão Pluggy (Open Finance)', description: 'Informe suas credenciais Pluggy (ou use as globais do servidor) e clique em “Conectar Novo Banco” para importar transações e faturas automaticamente.' },
+    { target: '.iasconta-wa-card', title: 'WhatsApp', description: 'Vincule seu WhatsApp escaneando o QR Code e aponte o grupo onde o bot vai registrar gastos e responder perguntas.' },
+    { target: '.iasconta-setup-save', title: 'Configurações do casal', description: 'Nomes do marido e da esposa, chaves de IA e canais extras ficam aqui. Role até o fim e clique em Salvar Configurações.' },
+  ]);
   // WhatsApp connection (single instance per logged-in user)
   const [waStatus, setWaStatus] = useState<WhatsAppStatus>({ exists: false, connected: false, connectionState: 'none' });
   const [qrLoading, setQrLoading] = useState(false);
@@ -316,7 +324,7 @@ export default function Setup() {
       <PaymentMethodsCard />
 
       {/* WhatsApp Group */}
-      <section className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-4">
+      <section className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-4 iasconta-wa-card">
         <SectionHeader icon={Smartphone} title="Bot WhatsApp" />
         <div className="space-y-3">
           <div>
@@ -379,7 +387,7 @@ export default function Setup() {
             </div>
           </section>
 
-          <button type="submit" disabled={saving} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 disabled:opacity-50 text-white py-2.5 rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200">
+          <button type="submit" disabled={saving} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 disabled:opacity-50 text-white py-2.5 rounded-xl text-sm font-semibold shadow-lg shadow-emerald-500/20 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 iasconta-setup-save">
             {saving ? 'Salvando...' : (<><Save className="w-4 h-4" />Salvar Configuracoes</>)}
           </button>
           {saveMsg && (

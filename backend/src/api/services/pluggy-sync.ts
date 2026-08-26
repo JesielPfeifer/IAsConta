@@ -52,6 +52,10 @@ export interface SyncResult {
   accounts: number;
   transactionsCreated: number;
   transactionsUpdated: number;
+  // Transações que o Pluggy ainda reporta mas que o usuário EXCLUIU na UI
+  // (soft-delete isHidden=true): puladas na reimportação para respeitar a
+  // exclusão. Logadas e retornadas no resultado do sync.
+  skippedHidden: number;
   billsCreated: number;
   billsUpdated: number;
   errors: string[];
@@ -364,6 +368,7 @@ export async function syncItem(itemId: string, userId: string): Promise<SyncResu
     accounts: 0,
     transactionsCreated: 0,
     transactionsUpdated: 0,
+    skippedHidden: 0,
     billsCreated: 0,
     billsUpdated: 0,
     errors: [],
@@ -573,6 +578,13 @@ async function syncBankAccount(
     };
 
     if (existing) {
+      // Oculta (exclusão do usuário sobrevive ao re-sync): PULAR a
+      // reimportação — nem recriar, nem atualizar. O externalId continua no
+      // banco justamente para o dedupe chegar aqui e respeitar a exclusão.
+      if (existing.isHidden) {
+        result.skippedHidden++;
+        continue;
+      }
       // Update mutable fields (description/amount may change on re-sync).
       // Rows the user edited manually keep their values — only genuinely new
       // Pluggy data (e.g. PENDING → POSTED) creates/updates untouched rows.
@@ -876,6 +888,12 @@ async function syncCreditCard(
       }
     }
     if (existing) {
+      // Oculta (exclusão do usuário sobrevive ao re-sync): PULAR — nem
+      // atualizar, nem reimportar. Mesma regra da conta corrente.
+      if (existing.isHidden) {
+        result.skippedHidden++;
+        continue;
+      }
       // Update sync-driven fields (keep the user's category edits). Rows the
       // user edited manually keep their values — no overwrite on re-sync.
       if (existing.manuallyEdited) continue;
@@ -1015,6 +1033,7 @@ export async function syncAllForUser(userId: string): Promise<SyncResult[]> {
         accounts: 0,
         transactionsCreated: 0,
         transactionsUpdated: 0,
+        skippedHidden: 0,
         billsCreated: 0,
         billsUpdated: 0,
         errors: [(err as Error).message],
@@ -1049,7 +1068,7 @@ export async function handlePluggyWebhook(body: Record<string, unknown>): Promis
 
   try {
     const result = await syncItem(itemId, connection.userId);
-    return `${eventName || "webhook"}: ${result.transactionsCreated} criadas, ${result.transactionsUpdated} atualizadas, ${result.billsCreated} faturas criadas`;
+    return `${eventName || "webhook"}: ${result.transactionsCreated} criadas, ${result.transactionsUpdated} atualizadas, ${result.skippedHidden} ocultas puladas, ${result.billsCreated} faturas criadas`;
   } catch (err) {
     logger.error(`[pluggy-webhook] sync falhou para item ${itemId}:`, err);
     return null;

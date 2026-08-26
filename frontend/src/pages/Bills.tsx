@@ -5,6 +5,7 @@ import BillForm from '../components/BillForm';
 import ConfirmModal from '../components/ConfirmModal';
 import { Plus, Check, Trash2, Pencil, X, ChevronDown, Calendar, Clock, CheckCircle2, AlertTriangle, type LucideIcon } from 'lucide-react';
 import dayjs from 'dayjs';
+import { useOnboarding } from '../hooks/useOnboarding';
 
 interface Bill {
   id: string;
@@ -80,6 +81,14 @@ interface ForecastCard {
 }
 
 export default function Bills() {
+
+  // ── Onboarding interativo (primeira visita) ──
+  useOnboarding('bills', [
+    { target: '.iasconta-total-pendente', title: 'Total Pendente', description: 'Soma das contas em aberto do mês — incluindo as faturas previstas dos cartões enquanto a fatura oficial não é publicada pelo banco.' },
+    { target: '.iasconta-forecast-cards', title: 'Faturas previstas', description: 'Projeção das faturas de cartão do mês. Use “Registrar como conta a pagar” para transformá-la numa conta real com valor editável.' },
+    { target: '.iasconta-paid-toggle', title: 'Marcar como pago', description: 'Clique no check ao lado da conta para marcar como paga (ou reabrir). Ela sai do Total Pendente e entra no Total Pago.' },
+    { target: '.iasconta-bill-amount', title: 'Editar valor', description: 'O valor de cada conta é clicável: ajuste ali mesmo sem abrir formulário — útil para corrigir a fatura quando ela fecha diferente da previsão.' },
+  ]);
   const [bills, setBills] = useState<Bill[]>([]);
   const [forecasts, setForecasts] = useState<ForecastCard[]>([]);
   const [loading, setLoading] = useState(true);
@@ -305,7 +314,7 @@ const filteredBills = bills.filter((b) => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="relative bg-gray-900/50 border border-white/5 rounded-2xl p-5 overflow-hidden hover:border-white/10 transition-colors duration-200">
+        <div className="relative bg-gray-900/50 border border-white/5 rounded-2xl p-5 overflow-hidden hover:border-white/10 transition-colors duration-200 iasconta-total-pendente">
           <div className="absolute inset-0 bg-gradient-to-b from-white/[0.03] to-transparent pointer-events-none" />
           <div className="relative">
             <div className="flex items-center justify-between mb-3">
@@ -367,7 +376,7 @@ const filteredBills = bills.filter((b) => {
         return (
           <div className="mb-4 grid gap-3 md:grid-cols-2">
             {rows.map((f: ForecastCard) => (
-              <div key={f.paymentMethod + f.month} className="rounded-2xl bg-amber-500/5 border border-amber-500/20 p-4">
+              <div key={f.paymentMethod + f.month} className="rounded-2xl bg-amber-500/5 border border-amber-500/20 p-4 iasconta-forecast-cards">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-sm font-medium text-amber-300 truncate">💳 Fatura prevista — {f.paymentMethod}</p>
                   <span className="text-base font-semibold text-amber-200 whitespace-nowrap">{formatCurrency(f.total)}</span>
@@ -457,7 +466,7 @@ const filteredBills = bills.filter((b) => {
                           ) : (
                             <button
                               onClick={() => setEditingAmount({ id: b.id, value: String(b.amount) })}
-                              className="hover:text-emerald-400 transition-colors group"
+                              className="hover:text-emerald-400 transition-colors group iasconta-bill-amount"
                               title="Editar valor"
                             >
                               {formatCurrency(b.amount)}
@@ -484,7 +493,7 @@ const filteredBills = bills.filter((b) => {
                         <td className="px-4 py-3 text-right">
                           <div className="flex items-center justify-end gap-1">
                             {!b.isPaid && (
-                              <button onClick={() => togglePaid(b)} className="p-1.5 hover:bg-emerald-500/10 rounded-lg text-gray-400 hover:text-emerald-400 transition-colors" title="Marcar como pago">
+                              <button onClick={() => togglePaid(b)} className="p-1.5 hover:bg-emerald-500/10 rounded-lg text-gray-400 hover:text-emerald-400 transition-colors iasconta-paid-toggle" title="Marcar como pago">
                                 <Check className="w-4 h-4" />
                               </button>
                             )}

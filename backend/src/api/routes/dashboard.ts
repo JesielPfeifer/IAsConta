@@ -176,6 +176,7 @@ router.get("/summary", async (req: Request, res: Response) => {
         where: {
           userId: user.id,
           date: { gte: start, lt: end },
+          isHidden: false,
           // Transactions linked to a credit card fatura are excluded: the
           // corresponding Bill row already counts that expense once.
           billId: null,
@@ -287,6 +288,7 @@ router.get("/by-category", async (req: Request, res: Response) => {
           userId: user.id,
           type: "EXPENSE",
           date: { gte: start, lt: end },
+          isHidden: false,
           billId: null,
         },
         include: { category: true },
@@ -338,6 +340,7 @@ router.get("/percentage", async (req: Request, res: Response) => {
           userId: user.id,
           type: "EXPENSE",
           date: { gte: start, lt: end },
+          isHidden: false,
           billId: null,
         },
       })

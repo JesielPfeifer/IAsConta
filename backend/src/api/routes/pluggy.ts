@@ -219,6 +219,7 @@ router.post("/items/attach", async (req: Request, res: Response) => {
         accounts: result.accounts,
         transactionsCreated: result.transactionsCreated,
         transactionsUpdated: result.transactionsUpdated,
+        skippedHidden: result.skippedHidden,
         billsCreated: result.billsCreated,
         billsUpdated: result.billsUpdated,
         errors: result.errors,

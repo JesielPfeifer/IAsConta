@@ -5,6 +5,7 @@ import { ArrowUpRight, ArrowDownRight, Wallet, PieChart, BarChart3, Clock, Check
 import { PieChart as RePie, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import dayjs from 'dayjs';
 import { api } from '../api/client';
+import { useOnboarding } from '../hooks/useOnboarding';
 
 const COLORS = ['#10b981', '#14b8a6', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#f97316', '#ef4444', '#84cc16', '#a855f7', '#14b8a6', '#e11d48'];
 
@@ -23,6 +24,13 @@ interface Bill {
 }
 
 export default function Dashboard() {
+
+  // ── Onboarding interativo (primeira visita) ──
+  useOnboarding('dashboard', [
+    { target: '.iasconta-summary-cards', title: 'Resumo do mês', description: 'Cards com receitas, despesas e saldo do mês selecionado. Use o seletor de mês no topo para navegar entre períodos.' },
+    { target: '.iasconta-month-compare', title: 'Comparação mensal', description: 'Veja a variação das suas despesas e receitas em relação ao mês anterior para acompanhar a evolução.' },
+    { target: '.iasconta-ai-tip', title: 'Dica da IA', description: 'Análises e sugestões automáticas baseadas nos seus dados financeiros aparecem aqui.' },
+  ]);
   const [month, setMonth] = useState(dayjs().format('YYYY-MM'));
   const { summary, byCategory, byPayment, creditCardTotal, comparison, yearAnalysis, tip, loading } = useDashboard(month);
   const { transactions } = useTransactions({ month });
@@ -109,7 +117,7 @@ export default function Dashboard() {
       </div>
 
       {/* Cards resumo */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 iasconta-summary-cards">
         <SummaryCard
           label="Saldo do mês"
           value={formatCurrency(balance)}
@@ -142,7 +150,7 @@ export default function Dashboard() {
 
       {/* Comparacao mês anterior */}
       {comparison && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 iasconta-month-compare">
           <MiniCard
             label="vs mês anterior"
             value={`${comparison.diffPercent > 0 ? '+' : ''}${comparison.diffPercent}%`}
@@ -418,6 +426,7 @@ export default function Dashboard() {
         )}
 
         {tip && (
+          <div className="iasconta-ai-tip">
           <SectionCard
             title="Dica de Economia"
             subtitle="IA analisou seus gastos"
@@ -443,6 +452,7 @@ export default function Dashboard() {
               )}
             </div>
           </SectionCard>
+          </div>
         )}
       </div>
     </div>
