@@ -141,6 +141,25 @@ export default function Bills() {
   }
   useEffect(() => { loadForecasts(); }, [bills]);
 
+  // Registra a fatura prevista como Conta a Pagar real (MANUAL, editavel).
+  // A partir dai ela entra no Total Pendente E no dashboard (Despesas do mes),
+  // e pode ter o valor corrigido direto na tabela.
+  async function handleRegisterForecast(f: ForecastCard) {
+    const [y, m] = f.month.split('-').map(Number);
+    const dueDate = dayjs(`${y}-${String(m).padStart(2, '0')}-10T12:00:00.000Z`).toISOString();
+    await api('/api/bills', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: `Fatura ${f.paymentMethod} — prevista ${f.month}`,
+        amount: f.total,
+        dueDate,
+        isPaid: false,
+      }),
+    });
+    setForecasts((prev: ForecastCard[]) => prev.filter((x) => !(x.paymentMethod === f.paymentMethod && x.month === f.month)));
+    loadBills();
+  }
+
   async function togglePaid(bill: Bill) {
     await api(`/api/bills/${bill.id}`, {
       method: 'PUT',
@@ -354,6 +373,12 @@ const filteredBills = bills.filter((b) => {
                   <span className="text-base font-semibold text-amber-200 whitespace-nowrap">{formatCurrency(f.total)}</span>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">{f.count} lançamento(s) · fatura oficial ainda não publicada pelo banco</p>
+                <button
+                  onClick={() => handleRegisterForecast(f)}
+                  className="mt-3 w-full flex items-center justify-center gap-2 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 hover:text-amber-200 px-3 py-2 rounded-xl text-sm transition-all duration-200"
+                >
+                  <Plus className="w-4 h-4" /> Registrar como conta a pagar (valor editável)
+                </button>
               </div>
             ))}
           </div>
