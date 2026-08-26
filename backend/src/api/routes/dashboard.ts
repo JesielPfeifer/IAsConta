@@ -242,10 +242,14 @@ router.get("/summary", async (req: Request, res: Response) => {
           wifeIncome += amount;
         }
       } else {
+        // REGRA: despesas do Pluggy que NÃO são fatura de cartão (PIX, TED,
+        // débito) não entram no total — só aparecem se lançadas manualmente.
+        const isPluggableNonCard =
+          tx.source === "PLUGGY" && !tx.isCreditCard;
         if (isExpense) {
-          totalExpense += amount;
+          if (!isPluggableNonCard) totalExpense += amount;
         } else {
-          totalIncome += amount;
+          if (!isPluggableNonCard) totalIncome += amount;
         }
       }
     }
@@ -267,9 +271,25 @@ router.get("/summary", async (req: Request, res: Response) => {
     const billsTotal = bills.reduce((sum, b) => sum + b.amount, 0);
     const balance = totalIncome - totalExpense;
 
+    // Despesas que NÃO são do cartão de crédito (PIX, débito, TED, contas em
+    // conta-corrente) — exclui transferências internas. O card "Cartão" já
+    // traz o total de fatura; este "Outros" separa o resto para o usuário.
+    const cardTxIds = new Set(
+      transactions.filter((t) => t.isCreditCard).map((t) => t.id)
+    );
+    const creditCardExpense = transactions
+      .filter((t) => t.isCreditCard && t.type === "EXPENSE")
+      .reduce((sum, t) => sum + t.amount, 0);
+    const expenseOther =
+      totalExpense - creditCardExpense - billsTotal < 0
+        ? 0
+        : totalExpense - creditCardExpense - billsTotal;
+
     res.json({
       totalIncome,
       totalExpense,
+      expenseOther,
+      creditCardExpense,
       balance,
       billsTotal,
       byPerson: {

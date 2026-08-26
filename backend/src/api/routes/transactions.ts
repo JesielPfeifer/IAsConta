@@ -210,6 +210,35 @@ router.get("/", async (req: Request, res: Response) => {
     if (type) where.type = type as string;
     if (source) where.source = source as string;
     if (paymentMethod) where.paymentMethod = paymentMethod as string;
+
+    // REGRA (definida pelo usuário): a aba Transações foca em FATURAS DE CARTÃO
+    // DE CRÉDITO. PIX enviado/recebido, TED e pagamentos em débito que vêm do
+    // Pluggy (Open Finance) NÃO aparecem automaticamente — só entram se o
+    // usuário criar a transação manualmente (source != PLUGGY). Assim o total
+    // de despesas reflete apenas compras de cartão + lançamentos manuais.
+    if (hidden !== "true") {
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : []),
+        {
+          OR: [
+            { source: { not: "PLUGGY" } },
+            {
+              AND: [
+                { source: "PLUGGY" },
+                {
+                  OR: [
+                    { isCreditCard: true },
+                    { description: { contains: "pagamento de fatura", mode: "insensitive" } },
+                    { description: { contains: "pagamento efetuado", mode: "insensitive" } },
+                    { description: { contains: "pagamento cartao", mode: "insensitive" } },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ];
+    }
     if (isShared !== undefined) where.isShared = isShared === "true";
 
     const transactions = await prisma.transaction.findMany({
