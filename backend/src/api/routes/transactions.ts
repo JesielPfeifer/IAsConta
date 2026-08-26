@@ -382,7 +382,7 @@ router.put("/:id", async (req: Request, res: Response) => {
  * semântica da exclusão física de parceladas). Caso contrário, apenas a linha.
  */
 function buildHiddenScopeWhere(
-  existing: { installmentGroupId: string | null; totalInstallments: number },
+  existing: { id?: string; installmentGroupId: string | null; totalInstallments: number },
   userId: string
 ): Record<string, unknown> {
   if (existing.installmentGroupId) {
