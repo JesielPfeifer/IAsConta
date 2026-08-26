@@ -86,7 +86,7 @@ router.get("/card-cycle", async (req: Request, res: Response) => {
     // aparece UMA vez na UI, independente de ter transações Pluggy, manuais ou
     // ambas.
     const pmRows = await prisma.transaction.findMany({
-      where: { userId: user.id, isCreditCard: true, isHidden: false },
+      where: { userId: user.id, isCreditCard: true, isHidden: false, isInternalTransfer: false },
       select: { pluggyAccountId: true, paymentMethod: true },
       distinct: ["paymentMethod"],
     });
@@ -170,6 +170,11 @@ router.get("/", async (req: Request, res: Response) => {
     // parâmetro (ou hidden=false), ocultas ficam de fora — exclusão do
     // usuário não pode ressuscitar na listagem normal nem nos totais.
     where.isHidden = hidden === "true";
+    // Transferências entre contas próprias (Nubank ↔ Caixa) não são gastos
+    // nem receitas — saem da listagem normal da aba Transações (o foco é a
+    // fatura do cartão de crédito). A aba "Ocultas" continua mostrando as
+    // transações ocultas pelo usuário; as internas são outro conceito.
+    if (hidden !== "true") where.isInternalTransfer = false;
 
     if (month) {
       const startOfMonth = new Date(`${month}-01T00:00:00.000Z`);

@@ -509,6 +509,41 @@ export async function syncItem(itemId: string, userId: string): Promise<SyncResu
 // ---------------------------------------------------------------
 // Bank accounts (checking/savings) -> plain transactions
 // ---------------------------------------------------------------
+
+/**
+ * Detecta se uma transação recém-sincronizada é transferência interna
+ * (mesmo usuário, entre contas próprias) olhando o banco por um par
+ * exato (mesmo valor ±3 dias, type oposto, conta Pluggy diferente, ambas
+ * "transfer-like"). Marca isInternalTransfer=true para não inflar totais.
+ */
+const TRANSFER_HINT_RE =
+  /(?:pix|transfer|ted|doc|envio|recebimento|deb\s*pix|entre contas|chave)/i;
+
+export async function detectInternalTransfer(
+  userId: string,
+  accountId: string,
+  type: string,
+  amount: number,
+  date: Date,
+  description: string
+): Promise<boolean> {
+  if (!TRANSFER_HINT_RE.test(description)) return false;
+  const days = 3;
+  const since = new Date(date.getTime() - days * 86400000);
+  const until = new Date(date.getTime() + days * 86400000);
+  const pair = await prisma.transaction.findFirst({
+    where: {
+      userId,
+      type: type === "EXPENSE" ? "INCOME" : "EXPENSE",
+      pluggyAccountId: { not: accountId },
+      amount: { equals: amount },
+      date: { gte: since, lte: until },
+      isHidden: false,
+    },
+  });
+  return !!pair;
+}
+
 async function syncBankAccount(
   client: ReturnType<typeof createPluggyClient>,
   account: PluggyAccount,
@@ -575,6 +610,14 @@ async function syncBankAccount(
       pluggyAccountId: account.id,
       externalId: tx.id,
       userId,
+      isInternalTransfer: await detectInternalTransfer(
+        userId,
+        account.id,
+        type,
+        resolveAmount(tx),
+        new Date(tx.date),
+        tx.description
+      ),
     };
 
     if (existing) {

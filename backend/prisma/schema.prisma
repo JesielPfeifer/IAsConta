@@ -73,6 +73,10 @@ model Transaction {
   // (isHidden=false) e podem ser revisadas/restauradas na aba "Ocultas".
   isHidden           Boolean         @default(false)
   hiddenAt           DateTime?
+  // Transferência entre contas próprias do usuário (ex.: Nubank ↔ Caixa).
+  // Não é receita nem despesa — apenas movimento de dinheiro entre contas
+  // próprias. Excluída dos totais de despesa/receita do dashboard.
+  isInternalTransfer Boolean         @default(false)
   userId      String
   user        User            @relation(fields: [userId], references: [id])
   createdAt   DateTime        @default(now())

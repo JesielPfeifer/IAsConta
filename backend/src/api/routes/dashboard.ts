@@ -45,13 +45,20 @@ function descriptionsMatchTransferPair(a: string, b: string): boolean {
 export function filterInternalTransfers<T extends { id: string; type: string; amount: number; date: Date; description: string; pluggyAccountId?: string | null }>(
   transactions: T[]
 ): T[] {
-  const transferCandidates = transactions.filter(
-    (tx) => TRANSFER_RE.test(tx.description) && tx.pluggyAccountId
-  );
+  // TRANSFER_HINT_RE: any description that smells like a transfer between
+  // accounts (not a purchase). The counterparty/bank name is irrelevant — we
+  // only use it to avoid flagging a real purchase as internal.
+  const TRANSFER_HINT_RE =
+    /(?:pix|transfer|ted|doc|envio|recebimento|deb\s*pix|entre contas|chave)/i;
+  const isTransferLike = (tx: T): boolean =>
+    !!tx.pluggyAccountId && TRANSFER_HINT_RE.test(tx.description);
+
+  const transferLike = transactions.filter(isTransferLike);
+
   const isInternalTransfer = (tx: T): boolean => {
-    if (!TRANSFER_RE.test(tx.description) || !tx.pluggyAccountId) return false;
+    if (!isTransferLike(tx)) return false;
     const wantedType = tx.type === "EXPENSE" ? "INCOME" : "EXPENSE";
-    const matches = transferCandidates.filter((other) => {
+    const matches = transferLike.filter((other) => {
       if (other.id === tx.id) return false;
       if (other.type !== wantedType) return false;
       if (other.pluggyAccountId === tx.pluggyAccountId) return false; // same account
@@ -61,14 +68,14 @@ export function filterInternalTransfers<T extends { id: string; type: string; am
       return true;
     });
     if (matches.length === 0) return false;
-    // Both legs describe the same transfer (same counterparty/bank after
-    // removing direction words) — certainly internal.
-    if (matches.some((o) => descriptionsMatchTransferPair(tx.description, o.description))) return true;
-    // No shared fingerprint (e.g. "PIX RECEBIDO DADOS CONTA" has no name),
-    // but there is a single exact-value counterpart within 3 days between
-    // two DIFFERENT own accounts: overwhelmingly an internal transfer
-    // (own money moved between accounts), otherwise it would inflate totals.
-    // With more than one candidate the fingerprint stays mandatory (safe).
+    // Strong signal: the two legs share a fingerprint (same counterparty/bank
+    // after stripping direction words).
+    if (matches.some((o) => descriptionsMatchTransferPair(tx.description, o.description)))
+      return true;
+    // Otherwise: a single exact-value counterpart within 3 days between two
+    // DIFFERENT own accounts, both transfer-like — almost certainly own money
+    // moved between accounts (e.g. "DEB PIX CHAVE" out vs "Transferência
+    // Recebida|JESIEL" in). Without this, internal transfers inflate totals.
     return matches.length === 1;
   };
   return transactions.filter((tx) => !isInternalTransfer(tx));
@@ -377,7 +384,19 @@ router.get("/percentage", async (req: Request, res: Response) => {
       }
     }
 
-    let husbandSalary = 0;
+    // Salário configurado nas Rendas Fixas (FixedIncome) entra na previsão.
+    // O campo user.salary (legado) é somado às rendas fixas ativas.
+    const fixedIncomes = await prisma.fixedIncome.findMany({
+      where: { userId: user.id, active: true },
+      select: { amount: true, person: true },
+    });
+    const fixedByPerson = { HUSBAND: 0, WIFE: 0, COUPLE: 0 };
+    for (const fi of fixedIncomes) {
+      const p = fi.person === "HUSBAND" || fi.person === "WIFE" || fi.person === "COUPLE" ? fi.person : "COUPLE";
+      fixedByPerson[p] += fi.amount;
+    }
+
+    let husbandSalary = (user.salary ?? 0) + fixedByPerson.HUSBAND + fixedByPerson.COUPLE;
     let wifeSalary = 0;
 
     if (user.partnerId) {
@@ -385,11 +404,20 @@ router.get("/percentage", async (req: Request, res: Response) => {
         where: { id: user.partnerId },
       });
       if (partner) {
-        wifeSalary = partner.salary ?? 0;
-        husbandSalary = user.salary ?? 0;
+        const partnerFixed = await prisma.fixedIncome.findMany({
+          where: { userId: partner.id, active: true },
+          select: { amount: true, person: true },
+        });
+        let partnerFixedSum = 0;
+        for (const fi of partnerFixed) {
+          const p = fi.person === "WIFE" || fi.person === "HUSBAND" || fi.person === "COUPLE" ? fi.person : "COUPLE";
+          if (p === "WIFE") partnerFixedSum += fi.amount;
+          else if (p === "COUPLE") partnerFixedSum += fi.amount / 2;
+        }
+        wifeSalary = (partner.salary ?? 0) + partnerFixedSum;
       }
     } else {
-      husbandSalary = user.salary ?? 0;
+      wifeSalary = fixedByPerson.WIFE;
     }
 
     const husbandPercentage = husbandSalary > 0 ? (husbandExpense / husbandSalary) * 100 : 0;
