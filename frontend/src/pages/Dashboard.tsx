@@ -24,6 +24,36 @@ interface Bill {
 }
 
 export default function Dashboard() {
+  const [pixReceived, setPixReceived] = useState<any[]>([]);
+  const [pixLoading, setPixLoading] = useState(false);
+  const [pixAddedIds, setPixAddedIds] = useState<string[]>([]);
+
+  // PIX/DOC recebidos via Pluggy que ainda não viraram entrada manual — o
+  // usuário decide se quer adicionar como receita (regra: só fatura de cartão
+  // conta automaticamente; PIX fica a critério).
+  async function loadPixReceived() {
+    try {
+      setPixLoading(true);
+      const rows = await api('/api/transactions/pix-received');
+      setPixReceived(Array.isArray(rows) ? rows : []);
+    } catch {
+      setPixReceived([]);
+    } finally {
+      setPixLoading(false);
+    }
+  }
+
+  useEffect(() => { loadPixReceived(); /* eslint-disable-next-line */ }, []);
+
+  async function addPixAsIncome(id: string) {
+    try {
+      await api(`/api/transactions/pix-received/${id}/add`, { method: 'POST' });
+      setPixAddedIds((p) => [...p, id]);
+      setPixReceived((p) => p.filter((t) => t.id !== id));
+    } catch (err: any) {
+      alert(err.message || 'Erro ao adicionar');
+    }
+  }
 
   // ── Onboarding interativo (primeira visita) ──
   useOnboarding('dashboard', [
@@ -337,6 +367,29 @@ export default function Dashboard() {
           icon={<DollarSign className="h-5 w-5 text-emerald-400" />}
           iconBg="bg-emerald-500/10"
         >
+          {pixReceived.length > 0 && (
+            <div className="mb-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+              <p className="text-sm text-emerald-300 font-medium mb-2">
+                Você recebeu {pixReceived.length} {pixReceived.length === 1 ? 'PIX/DOC' : 'PIX/DOC'} via Open Finance neste mês. Deseja adicionar como entrada?
+              </p>
+              <ul className="space-y-1.5">
+                {pixReceived.map((t) => (
+                  <li key={t.id} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="text-gray-300 truncate">{dayjs(t.date).format('DD/MM')} · {t.description}</span>
+                    <span className="flex items-center gap-2">
+                      <span className="text-emerald-400 font-semibold">+{formatCurrency(Math.abs(t.amount))}</span>
+                      <button
+                        onClick={() => addPixAsIncome(t.id)}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 text-xs font-medium transition-colors"
+                      >
+                        Adicionar
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {incomeTx.length > 0 ? (
             <table className="w-full text-sm">
               <thead>

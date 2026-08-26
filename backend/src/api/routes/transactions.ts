@@ -208,7 +208,7 @@ router.get("/", async (req: Request, res: Response) => {
     if (categoryId) where.categoryId = categoryId as string;
     if (person) where.person = person as string;
     if (type) where.type = type as string;
-    if (source) where.source = source as string;
+    if (source) (where as any).source = Array.isArray(source) ? source[0] : source;
     if (paymentMethod) where.paymentMethod = paymentMethod as string;
 
     // REGRA (definida pelo usuário): a aba Transações foca em FATURAS DE CARTÃO
@@ -248,6 +248,78 @@ router.get("/", async (req: Request, res: Response) => {
     });
 
     res.json(transactions);
+  } catch (err) {
+    logger.error(err);
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+
+// PIX/DOC recebidos via Pluggy que ainda NÃO viraram entrada manual. O frontend
+// mostra um banner perguntando se o usuário quer adicionar como receita.
+const PIX_RECEIVED_RE = /(?:pix recebido|doc recebido|transferencia recebida|recebimento ted|ted )/i;
+
+router.get("/pix-received", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    const { month } = req.query;
+    let start: Date;
+    let end: Date;
+    if (month && /^\d{4}-\d{2}$/.test(month as string)) {
+      const [y, m] = (month as string).split("-").map(Number);
+      start = new Date(y, m - 1, 1);
+      end = new Date(y, m, 1);
+    } else {
+      const now = new Date();
+      start = new Date(now.getFullYear(), now.getMonth(), 1);
+      end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    }
+    const rows = await prisma.transaction.findMany({
+      where: {
+        userId: user.id,
+        type: "INCOME",
+        source: "PLUGGY",
+        isInternalTransfer: false,
+        isHidden: false,
+        date: { gte: start, lt: end },
+      },
+      orderBy: { date: "desc" },
+    });
+    const candidates = rows.filter((t) => PIX_RECEIVED_RE.test(t.description));
+    res.json(candidates);
+  } catch (err) {
+    logger.error(err);
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+// Converte um PIX recebido do Pluggy em uma entrada manual (source=MANUAL),
+// para que passe a contar como receita de fato.
+router.post("/pix-received/:id/add", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    const tx = await prisma.transaction.findFirst({
+      where: { id: req.params.id, userId: user.id } as any,
+    });
+    if (!tx) {
+      res.status(404).json({ error: "Transação não encontrada" });
+      return;
+    }
+    const created = await prisma.transaction.create({
+      data: {
+        amount: tx.amount,
+        type: "INCOME",
+        description: tx.description,
+        date: tx.date,
+        source: "MANUAL",
+        paymentMethod: tx.paymentMethod,
+        person: tx.person,
+        isShared: tx.isShared,
+        categoryId: tx.categoryId,
+        userId: user.id,
+      },
+    });
+    res.status(201).json(created);
   } catch (err) {
     logger.error(err);
     res.status(500).json({ error: "Erro interno" });
