@@ -92,6 +92,41 @@ export default function Transactions() {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set([]));
   const [cardCycles, setCardCycles] = useState<any[]>([]);
 
+  // Prompt de revisão de salário: TED de salário com valor diferente da
+  // Rendas Fixas configurada. O usuário decide se atualiza o mês vigente.
+  const salaryReview = useMemo(
+    () => transactions.filter((t) => (t as any).salaryReviewPending),
+    [transactions]
+  );
+  const [salaryUpdating, setSalaryUpdating] = useState(false);
+
+  async function updateSalaryFromReview(id: string, novoValor: number) {
+    try {
+      setSalaryUpdating(true);
+      await api(`/api/transactions/${id}/salary-review`, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'update', amount: novoValor }),
+      });
+      await refresh();
+    } catch (e: any) {
+      alert(e.message || 'Erro ao atualizar salário');
+    } finally {
+      setSalaryUpdating(false);
+    }
+  }
+
+  async function dismissSalaryReview(id: string) {
+    try {
+      await api(`/api/transactions/${id}/salary-review`, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'dismiss' }),
+      });
+      await refresh();
+    } catch (e: any) {
+      alert(e.message || 'Erro');
+    }
+  }
+
 
   const filtered = useMemo(() => {
     if (!search) return transactions;
@@ -286,6 +321,31 @@ export default function Transactions() {
 
   return (
     <div className="space-y-6">
+      {salaryReview.length > 0 && (
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
+          <p className="text-sm text-amber-200 font-medium">
+            A TED de salário veio com valor diferente da sua Rendas Fixas. Deseja atualizar o mês vigente?
+          </p>
+          {salaryReview.map((t) => (
+            <div key={t.id} className="flex flex-wrap items-center gap-3 text-sm">
+              <span className="text-gray-300">{dayjs(t.date).format('DD/MM')} · {formatCurrency(Math.abs(t.amount))}</span>
+              <button
+                disabled={salaryUpdating}
+                onClick={() => updateSalaryFromReview(t.id, Math.abs(t.amount))}
+                className="px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 text-xs font-medium transition-colors disabled:opacity-50"
+              >
+                Atualizar renda fixa p/ {formatCurrency(Math.abs(t.amount))}
+              </button>
+              <button
+                onClick={() => dismissSalaryReview(t.id)}
+                className="px-3 py-1.5 rounded-lg bg-white/5 text-gray-400 hover:bg-white/10 text-xs font-medium transition-colors"
+              >
+                Manter atual
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <style>{`@keyframes dropExpand { from { opacity: 0; transform: translateY(-12px) translateX(-7px); } to { opacity: 1; transform: translateY(0px) translateX(0px); } }`}</style>
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>

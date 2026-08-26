@@ -1,3 +1,4 @@
+import dayjs from 'dayjs';
 import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import { z } from "zod";
@@ -776,4 +777,55 @@ botRouter.put("/:id", async (req: Request, res: Response) => {
 });
 
 export { botRouter };
+
+// Revisão de salário: TED de salário veio com valor diferente da Rendas Fixas.
+// action=update → atualiza a FixedIncome de salário do mês vigente e limpa a flag.
+// action=dismiss → apenas limpa a flag (mantém a renda fixa atual).
+router.post("/:id/salary-review", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    const body = req.body as { action?: string; amount?: number };
+    const action = body.action;
+    const amount = body.amount;
+    if (!action || !["update", "dismiss"].includes(action)) {
+      res.status(400).json({ error: "action inválida" });
+      return;
+    }
+    const tx = await prisma.transaction.findFirst({
+      where: { id: req.params.id, userId: user.id, salaryReviewPending: true } as any,
+    });
+    if (!tx) {
+      res.status(404).json({ error: "Transação de revisão não encontrada" });
+      return;
+    }
+    if (action === "update") {
+      const valor = Math.abs(amount ?? tx.amount);
+      const fixed = await prisma.fixedIncome.findMany({
+        where: {
+          userId: user.id,
+          active: true,
+          OR: [
+            { name: { contains: "salario", mode: "insensitive" } },
+            { name: { contains: "salário", mode: "insensitive" } },
+          ],
+        },
+      });
+      for (const f of fixed) {
+        await prisma.fixedIncome.update({
+          where: { id: f.id },
+          data: { amount: valor },
+        });
+      }
+    }
+    await prisma.transaction.update({
+      where: { id: tx.id },
+      data: { salaryReviewPending: false },
+    });
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 export default router;

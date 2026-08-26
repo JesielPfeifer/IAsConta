@@ -77,6 +77,10 @@ model Transaction {
   // Não é receita nem despesa — apenas movimento de dinheiro entre contas
   // próprias. Excluída dos totais de despesa/receita do dashboard.
   isInternalTransfer Boolean         @default(false)
+  // TED de salário recebida com valor diferente da Rendas Fixas configurada:
+  // o usuário decide se atualiza o valor do mês vigente. Enquanto não decide,
+  // a transação fica marcada para exibir um prompt na UI.
+  salaryReviewPending Boolean        @default(false)
   userId      String
   user        User            @relation(fields: [userId], references: [id])
   createdAt   DateTime        @default(now())

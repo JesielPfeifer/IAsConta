@@ -544,6 +544,37 @@ export async function detectInternalTransfer(
   return !!pair;
 }
 
+
+/**
+ * Detecta se uma transação é uma TED de salário cujo valor NÃO bate com a
+ * Rendas Fixas (salário) configurada pelo usuário. Retorna true quando:
+ *  - a descrição indica recebimento de salário/TED
+ *  - existe uma FixedIncome de salário ativa com valor diferente desta tx
+ * O frontend então pergunta se o usuário quer atualizar a renda fixa do mês.
+ */
+const SALARY_RE = /(?:salario|salário|ted salario|recebimento ted|folha|pagamento de salario)/i;
+
+export async function detectSalaryMismatch(
+  userId: string,
+  amount: number,
+  description: string
+): Promise<boolean> {
+  if (!SALARY_RE.test(description)) return false;
+  const fixed = await prisma.fixedIncome.findMany({
+    where: {
+      userId,
+      active: true,
+      OR: [
+        { name: { contains: "salario", mode: "insensitive" } },
+        { name: { contains: "salário", mode: "insensitive" } },
+      ],
+    },
+  });
+  if (fixed.length === 0) return false;
+  // Há renda fixa de salário com valor diferente? marca para revisão.
+  return fixed.some((f) => Math.abs(f.amount - amount) >= 0.01);
+}
+
 async function syncBankAccount(
   client: ReturnType<typeof createPluggyClient>,
   account: PluggyAccount,
@@ -616,6 +647,11 @@ async function syncBankAccount(
         type,
         resolveAmount(tx),
         new Date(tx.date),
+        tx.description
+      ),
+      salaryReviewPending: await detectSalaryMismatch(
+        userId,
+        resolveAmount(tx),
         tx.description
       ),
     };
