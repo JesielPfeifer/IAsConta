@@ -136,6 +136,7 @@ async function cardTransactionWhere(userId: string, start: Date, end: Date) {
   return {
     userId,
     type: "EXPENSE" as const,
+    isHidden: false,
     AND: [
       ...notTransfer,
       // Filtro pela FATURA (mês correto): billForecastMonth = mês filtrado,
@@ -214,6 +215,12 @@ router.get("/summary", async (req: Request, res: Response) => {
       const amount = tx.amount;
       const person = tx.person;
 
+      // REGRA: transações importadas do Pluggy que NÃO são fatura de cartão
+      // (PIX, TED, débito em conta) não entram nos totais — só passam a
+      // contar quando lançadas manualmente. Vale para QUALQUER pessoa
+      // (HUSBAND/WIFE/COUPLE), não só para lançamentos sem pessoa atribuída.
+      if (tx.source === "PLUGGY" && !tx.isCreditCard) continue;
+
       if (person === "COUPLE") {
         const half = amount / 2;
         if (isExpense) {
@@ -242,14 +249,12 @@ router.get("/summary", async (req: Request, res: Response) => {
           wifeIncome += amount;
         }
       } else {
-        // REGRA: despesas do Pluggy que NÃO são fatura de cartão (PIX, TED,
-        // débito) não entram no total — só aparecem se lançadas manualmente.
-        const isPluggableNonCard =
-          tx.source === "PLUGGY" && !tx.isCreditCard;
+        // Lançamentos manuais/bot sem pessoa atribuída contam normalmente
+        // (os importados não-cartão já foram excluídos acima).
         if (isExpense) {
-          if (!isPluggableNonCard) totalExpense += amount;
+          totalExpense += amount;
         } else {
-          if (!isPluggableNonCard) totalIncome += amount;
+          totalIncome += amount;
         }
       }
     }
@@ -416,7 +421,10 @@ router.get("/percentage", async (req: Request, res: Response) => {
       fixedByPerson[p] += fi.amount;
     }
 
-    let husbandSalary = (user.salary ?? 0) + fixedByPerson.HUSBAND + fixedByPerson.COUPLE;
+    // Renda do casal (COUPLE) entra MEIO a meio no salário de cada cônjuge —
+    // mesma regra da soma da parceira abaixo (fixedByPerson.COUPLE/2). Sem
+    // isso, o denominador do percentual do marido ficava maior que o da esposa.
+    let husbandSalary = (user.salary ?? 0) + fixedByPerson.HUSBAND + fixedByPerson.COUPLE / 2;
     let wifeSalary = 0;
 
     if (user.partnerId) {
@@ -462,7 +470,7 @@ router.get("/by-payment", async (req: Request, res: Response) => {
     // Bill row (paymentMethod "Fatura Cartão"), same rule as /summary.
     const [transactions, bills] = await Promise.all([
       prisma.transaction.findMany({
-        where: { userId: user.id, type: "EXPENSE", date: { gte: start, lt: end }, billId: null },
+        where: { userId: user.id, type: "EXPENSE", date: { gte: start, lt: end }, billId: null, isHidden: false },
       }),
       prisma.bill.findMany({
         where: { userId: user.id, dueDate: { gte: start, lt: end } },
@@ -523,8 +531,8 @@ router.get("/comparison", async (req: Request, res: Response) => {
 
     // Bill-aware comparison (same rule as /summary): faturas count once.
     const [currTx, prevTx, currBills, prevBills] = await Promise.all([
-      prisma.transaction.findMany({ where: { userId: user.id, date: { gte: start, lt: end }, billId: null } }),
-      prisma.transaction.findMany({ where: { userId: user.id, date: { gte: prevStart, lt: prevEnd }, billId: null } }),
+      prisma.transaction.findMany({ where: { userId: user.id, date: { gte: start, lt: end }, billId: null, isHidden: false } }),
+      prisma.transaction.findMany({ where: { userId: user.id, date: { gte: prevStart, lt: prevEnd }, billId: null, isHidden: false } }),
       prisma.bill.findMany({ where: { userId: user.id, dueDate: { gte: start, lt: end } } }),
       prisma.bill.findMany({ where: { userId: user.id, dueDate: { gte: prevStart, lt: prevEnd } } }),
     ]);
@@ -564,7 +572,7 @@ router.get("/year-analysis", async (req: Request, res: Response) => {
     // /summary; internal transfers are excluded from the aggregates.
     const [transactions, bills] = await Promise.all([
       prisma.transaction.findMany({
-        where: { userId: user.id, type: "EXPENSE", date: { gte: start, lt: end }, billId: null },
+        where: { userId: user.id, type: "EXPENSE", date: { gte: start, lt: end }, billId: null, isHidden: false },
         include: { category: true },
       }),
       prisma.bill.findMany({
@@ -617,7 +625,7 @@ router.get("/tip", async (req: Request, res: Response) => {
     // Bill-aware tip: same aggregation rule as /summary (faturas contam 1x).
     const [transactions, bills] = await Promise.all([
       prisma.transaction.findMany({
-        where: { userId: user.id, type: "EXPENSE", date: { gte: start, lt: end }, billId: null },
+        where: { userId: user.id, type: "EXPENSE", date: { gte: start, lt: end }, billId: null, isHidden: false },
         include: { category: true },
       }),
       prisma.bill.findMany({
@@ -720,6 +728,7 @@ router.get("/income-detail", async (req: Request, res: Response) => {
         userId: user.id,
         type: "INCOME",
         date: { gte: start, lt: end },
+        isHidden: false,
       },
       orderBy: { date: "desc" },
     });
