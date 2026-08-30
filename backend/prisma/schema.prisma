@@ -81,6 +81,11 @@ model Transaction {
   // o usuário decide se atualiza o valor do mês vigente. Enquanto não decide,
   // a transação fica marcada para exibir um prompt na UI.
   salaryReviewPending Boolean        @default(false)
+  // FixedIncome (renda fixa salarial) que gerou esta revisão — gravada pelo
+  // sync quando detecta divergência. O salary-review atualiza SOMENTE esse
+  // registro (pode haver um salário por pessoa do casal; atualizar todos
+  // sobrescreveria a renda do outro cônjuge).
+  salaryFixedIncomeId String?
   userId      String
   user        User            @relation(fields: [userId], references: [id])
   createdAt   DateTime        @default(now())
