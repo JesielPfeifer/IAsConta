@@ -528,18 +528,8 @@ export async function detectInternalTransfer(
   description: string
 ): Promise<boolean> {
   if (!TRANSFER_HINT_RE.test(description)) return false;
-  const days = 3;
-  const since = new Date(date.getTime() - days * 86400000);
-  const until = new Date(date.getTime() + days * 86400000);
   const pair = await prisma.transaction.findFirst({
-    where: {
-      userId,
-      type: type === "EXPENSE" ? "INCOME" : "EXPENSE",
-      pluggyAccountId: { not: accountId },
-      amount: { equals: amount },
-      date: { gte: since, lte: until },
-      isHidden: false,
-    },
+    where: internalTransferPairWhere(userId, accountId, type, amount, date) as any,
   });
   return !!pair;
 }
@@ -547,10 +537,14 @@ export async function detectInternalTransfer(
 
 /**
  * Detecta se uma transação é uma TED de salário cujo valor NÃO bate com a
- * Rendas Fixas (salário) configurada pelo usuário. Retorna true quando:
- *  - a descrição indica recebimento de salário/TED
- *  - existe uma FixedIncome de salário ativa com valor diferente desta tx
- * O frontend então pergunta se o usuário quer atualizar a renda fixa do mês.
+ * Rendas Fixas (salário) configurada pelo usuário. Retorna o id da ÚNICA
+ * FixedIncome que gerou a divergência (ou null quando):
+ *  - a descrição não indica recebimento de salário/TED
+ *  - não há FixedIncome de salário ativa
+ *  - alguma das rendas salariais bate EXATAMENTE com o valor recebido
+ * Quando nenhuma bate, escolhe a renda MAIS PRÓXIMA do valor — é ela que a
+ * revisão (salary-review) vai atualizar, sem tocar nas demais (o casal pode
+ * ter um salário por pessoa).
  */
 const SALARY_RE = /(?:salario|salário|ted salario|recebimento ted|folha|pagamento de salario)/i;
 
@@ -558,8 +552,8 @@ export async function detectSalaryMismatch(
   userId: string,
   amount: number,
   description: string
-): Promise<boolean> {
-  if (!SALARY_RE.test(description)) return false;
+): Promise<string | null> {
+  if (!SALARY_RE.test(description)) return null;
   const fixed = await prisma.fixedIncome.findMany({
     where: {
       userId,
@@ -570,9 +564,39 @@ export async function detectSalaryMismatch(
       ],
     },
   });
-  if (fixed.length === 0) return false;
-  // Há renda fixa de salário com valor diferente? marca para revisão.
-  return fixed.some((f) => Math.abs(f.amount - amount) >= 0.01);
+  if (fixed.length === 0) return null;
+  // Se UMA das rendas corresponde ao valor recebido, não há divergência (o
+  // some() antigo marcava revisão até quando o outro salário do casal batia).
+  const exata = fixed.find((f) => Math.abs(f.amount - amount) < 0.01);
+  if (exata) return null;
+  const maisProxima = fixed.reduce((melhor, f) =>
+    Math.abs(f.amount - amount) < Math.abs(melhor.amount - amount) ? f : melhor
+  );
+  return maisProxima.id;
+}
+
+/** Candidata a perna OPOSTA de uma transferência interna: mesmo valor ±3 dias,
+ * tipo oposto, conta Pluggy diferente e origem do sync. Usada para detectar
+ * o par e para (re)classificar a perna oposta quando ela já está no banco. */
+function internalTransferPairWhere(
+  userId: string,
+  accountId: string,
+  type: string,
+  amount: number,
+  date: Date
+): Record<string, unknown> {
+  const days = 3;
+  const since = new Date(date.getTime() - days * 86400000);
+  const until = new Date(date.getTime() + days * 86400000);
+  return {
+    userId,
+    type: type === "EXPENSE" ? "INCOME" : "EXPENSE",
+    pluggyAccountId: { not: accountId },
+    amount: { equals: amount },
+    date: { gte: since, lte: until },
+    source: "PLUGGY",
+    isHidden: false,
+  };
 }
 
 async function syncBankAccount(
@@ -626,11 +650,44 @@ async function syncBankAccount(
       ? await findOrCreateCategory(categoryName, userId)
       : null;
 
+    const amount = resolveAmount(tx);
+    const transferDate = new Date(tx.date);
+    const isInternalTransfer = await detectInternalTransfer(
+      userId,
+      account.id,
+      type,
+      amount,
+      transferDate,
+      tx.description
+    );
+    // Revisão de salário: id da ÚNICA FixedIncome que diverge (null = ok).
+    const salaryMismatch = await detectSalaryMismatch(
+      userId,
+      amount,
+      tx.description
+    );
+    // Quando a perna OPOSTA da transferência interna já está no banco
+    // (importada antes desta), classifica também ela — senão uma perna fica
+    // isInternalTransfer=false e continua aparecendo nos totais até o próximo
+    // sync da outra conta.
+    if (isInternalTransfer) {
+      await prisma.transaction.updateMany({
+        where: internalTransferPairWhere(
+          userId,
+          account.id,
+          type,
+          amount,
+          transferDate
+        ) as any,
+        data: { isInternalTransfer: true },
+      });
+    }
+
     const data = {
-      amount: resolveAmount(tx),
+      amount,
       type,
       description: tx.description,
-      date: new Date(tx.date),
+      date: transferDate,
       source: "PLUGGY" as const,
       paymentMethod,
       // Account owner (Open Finance holder name) → link to husband/wife.
@@ -641,19 +698,9 @@ async function syncBankAccount(
       pluggyAccountId: account.id,
       externalId: tx.id,
       userId,
-      isInternalTransfer: await detectInternalTransfer(
-        userId,
-        account.id,
-        type,
-        resolveAmount(tx),
-        new Date(tx.date),
-        tx.description
-      ),
-      salaryReviewPending: await detectSalaryMismatch(
-        userId,
-        resolveAmount(tx),
-        tx.description
-      ),
+      isInternalTransfer,
+      salaryReviewPending: !!salaryMismatch,
+      salaryFixedIncomeId: salaryMismatch,
     };
 
     if (existing) {
@@ -673,7 +720,13 @@ async function syncBankAccount(
         existing.description !== data.description ||
         existing.date.getTime() !== data.date.getTime() ||
         existing.type !== type ||
-        existing.person !== data.person;
+        existing.person !== data.person ||
+        // Classificações recalculadas também persistem: transferência interna
+        // e revisão de salário podem mudar entre syncs (o par oposto chega
+        // depois, o usuário atualiza a renda fixa, etc.).
+        existing.isInternalTransfer !== data.isInternalTransfer ||
+        existing.salaryReviewPending !== data.salaryReviewPending ||
+        existing.salaryFixedIncomeId !== data.salaryFixedIncomeId;
       if (changed) {
         await prisma.transaction.update({
           where: { id: existing.id },
@@ -683,6 +736,9 @@ async function syncBankAccount(
             date: data.date,
             type,
             person: data.person,
+            isInternalTransfer: data.isInternalTransfer,
+            salaryReviewPending: data.salaryReviewPending,
+            salaryFixedIncomeId: data.salaryFixedIncomeId,
           },
         });
         result.transactionsUpdated++;
