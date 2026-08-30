@@ -148,6 +148,28 @@ Internet ──▶ Cloudflare Tunnel ──▶ Traefik ──▶ nginx (iasconta
 - Domínio: `https://iasconta.jesielpfeifer.com`
 - O rebuild de imagem é feito com `docker compose up -d --build api web`; após recriar a API, recarregue o nginx (`docker exec iasconta-web nginx -s reload`) para evitar 502 por cache de DNS.
 
+## Release
+
+O projeto usa [Conventional Commits](https://www.conventionalcommits.org/pt-br/) (`feat:`, `fix:`, `docs:`...) e o processo de release é semiautomático: a próxima versão é calculada a partir dos commits entre as tags.
+
+| Commit | Bump |
+|---|---|
+| `feat!:` ou `BREAKING CHANGE` | major (ex.: v2.0.0) |
+| `feat:` | minor (ex.: v1.1.0) |
+| `fix:` / `perf:` / `docs:` / demais | patch (ex.: v1.0.1) |
+
+**Pelo GitHub (recomendado):** em **Actions → Release → Run workflow**, escolha o tipo — `auto` calcula o bump pelos commits, ou force `patch`/`minor`/`major`. O workflow gera o changelog agrupado (🚀 Features, 🐛 Fixes, ⚙️ Manutenção) com links para commits/PRs, cria a tag `vX.Y.Z` e publica a Release com as notas geradas.
+
+**Localmente (desenvolvedor):**
+
+```bash
+./scripts/release.sh                    # bump automático e publica
+./scripts/release.sh --tipo=major       # força major (ex.: primeira release v1.0.0)
+./scripts/release.sh --dry-run          # pré-visualiza versão e changelog, sem criar nada
+```
+
+O script atualiza o `CHANGELOG.md`, cria a tag anotada e publica a Release via `gh`. Sem mudanças desde a última tag, o processo aborta.
+
 ## Estrutura
 
 ```
