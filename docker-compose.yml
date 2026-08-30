@@ -74,7 +74,7 @@ services:
             - easypanel
         labels:
             - "traefik.enable=true"
-            - "traefik.http.routers.iasconta-web.rule=Host(`duda`) || Host(`192.168.100.240`)"
+            - "traefik.http.routers.iasconta-web.rule=Host(`iasconta.jesielpfeifer.com`)"
             - "traefik.http.routers.iasconta-web.priority=100"
             - "traefik.http.routers.iasconta-web.entrypoints=http,https"
             - "traefik.http.routers.iasconta-web.tls=true"
