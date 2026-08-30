@@ -23,6 +23,7 @@ import incomeEntryRoutes from "./api/routes/income-entries.js";
 import pluggyRoutes from "./api/routes/pluggy.js";
 import settingsRoutes from "./api/routes/settings.js";
 import annualRoutes from "./api/routes/annual.js";
+import setupRoutes from "./api/routes/setup.js";
 import { startWhatsApp, sendMessage } from "./bot/platforms/whatsapp.js";
 import { startDiscord } from "./bot/platforms/discord.js";
 import { startTelegram } from "./bot/platforms/telegram.js";
@@ -86,6 +87,7 @@ app.use("/api/fixed-incomes", fixedIncomeRoutes);
 app.use("/api/income-entries", incomeEntryRoutes);
 app.use("/api/pluggy", pluggyRoutes);
 app.use("/api/settings", settingsRoutes);
+app.use("/api/setup", setupRoutes);
 app.use("/api/annual", annualRoutes);
 
 app.post("/api/parse/nubank", upload.single("file"), async (req, res) => {

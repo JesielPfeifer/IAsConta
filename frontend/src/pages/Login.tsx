@@ -42,7 +42,7 @@ export default function Login() {
             <Wallet2 className="w-7 h-7 text-white" strokeWidth={2.5} />
           </div>
           <h1 className="text-3xl font-bold text-white tracking-tight">Contas</h1>
-          <p className="text-gray-400 text-sm mt-1">Gestao financeira pessoal</p>
+          <p className="text-gray-400 text-sm mt-1">Gestão financeira pessoal</p>
         </div>
 
         <div className="rounded-2xl bg-gray-900/50 backdrop-blur-xl border border-white/10 shadow-2xl shadow-black/40 overflow-hidden">
@@ -105,14 +105,14 @@ export default function Login() {
                   required
                   minLength={6}
                   className="w-full bg-white/[0.03] border border-white/10 rounded-xl pl-10 pr-3 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/30 transition-all duration-200"
-                  placeholder="Minimo 6 caracteres"
+                  placeholder="Mínimo 6 caracteres"
                 />
               </div>
             </div>
 
             {isRegister && (
               <div>
-                <label className="block text-sm font-medium text-gray-400 mb-1.5">Salario (opcional)</label>
+                <label className="block text-sm font-medium text-gray-400 mb-1.5">Salário (opcional)</label>
                 <div className="relative">
                   <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
                   <input
@@ -152,7 +152,7 @@ export default function Login() {
             </button>
 
             <div className="pt-2 text-center text-sm text-gray-400">
-              {isRegister ? 'Ja tem conta?' : 'Novo por aqui?'}{' '}
+              {isRegister ? 'Já tem conta?' : 'Novo por aqui?'}{' '}
               <button
                 type="button"
                 onClick={handleToggle}
@@ -166,7 +166,7 @@ export default function Login() {
         </div>
 
         <p className="text-center text-xs text-gray-600 mt-6">
-          Contas - Gestao financeira para casais
+          Contas - Gestão financeira para casais
         </p>
       </div>
     </div>
