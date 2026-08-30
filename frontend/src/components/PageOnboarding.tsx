@@ -126,10 +126,13 @@ export function PageOnboarding({
   useEffect(() => {
     if (!step?.target) return;
     try {
-      document.querySelector(step.target)?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center',
-      });
+      const el = document.querySelector(step.target);
+      if (el && el.getBoundingClientRect().height > window.innerHeight - 200) {
+        // Alvo muito alto: mostra o início (evita tooltip cortado no fim)
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else {
+        el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
     } catch {
       // seletor inválido — segue com passo centralizado
     }
@@ -159,11 +162,14 @@ export function PageOnboarding({
     : undefined;
 
   // Posição do tooltip: abaixo do alvo; se não couber, acima; sem alvo, centro.
+  // Alvos muito altos (maiores que o viewport útil) sempre usam "abaixo" com
+  // clamp — o tooltip fica preso dentro da tela mesmo com o destaque gigante.
   let tipStyle: React.CSSProperties;
   if (hasTarget) {
-    const below =
-      rect!.top + rect!.height + 16 + 220 < window.innerHeight ||
-      rect!.top - 16 - 220 < 0;
+    const tooltipH = 220;
+    const bigTarget = rect!.height > window.innerHeight - tooltipH - 100;
+    const fitsBelow = rect!.top + rect!.height + 16 + tooltipH <= window.innerHeight;
+    const below = bigTarget || fitsBelow || rect!.top - 16 - tooltipH < 0;
     tipStyle = {
       position: 'fixed',
       maxWidth: 340,

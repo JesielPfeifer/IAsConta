@@ -119,9 +119,10 @@ function SectionHeader({ title, sectionKey, open, onToggle, icon }: { title: str
 export default function Salary() {
   // ── Onboarding interativo (primeira visita) ──
   const onboarding = useOnboarding('salary', [
-    { target: '.iasconta-salary-form', title: 'Cálculo automático', description: 'Preencha salário base, adicionais e descontos: INSS e IRRF são calculados automaticamente pelas tabelas vigentes, e o líquido atualiza em tempo real.' },
+    { target: '.iasconta-salary-base', title: 'Cálculo automático', description: 'Preencha o salário base: INSS e IRRF são calculados automaticamente pelas tabelas vigentes, e o líquido atualiza em tempo real.' },
+    { target: '.iasconta-salary-additions', title: 'Adicionais e benefícios', description: 'Some periculosidade, noturno, hora extra, comissão e outros adicionais — eles entram na base de cálculo.' },
     { target: '.iasconta-tax-overrides', title: 'Alíquotas editáveis', description: 'Deixe INSS/IRRF vazios para usar o cálculo automático ou digite um valor para sobrescrever (0 marca como isento).' },
-    { target: '.iasconta-fixed-incomes', title: 'Rendas fixas mensais', description: 'Cadastre aqui os salários/recorrentes de cada pessoa do casal — eles alimentam o acompanhamento mensal.' },
+    { target: '.iasconta-fixed-incomes-add', title: 'Rendas fixas mensais', description: 'Cadastre aqui os salários/recorrentes de cada pessoa do casal — eles alimentam o acompanhamento mensal.' },
   ]);
 
   const [baseSalary, setBaseSalary] = useState('');
@@ -344,7 +345,9 @@ export default function Salary() {
                   <SectionHeader title="Salario Base" sectionKey="base" open={openSections.base} onToggle={toggleSection} icon={<Wallet className="w-4 h-4" />} />
                   {openSections.base && (
                     <div className="pb-4 pt-1 space-y-4">
-                      <Field label="Salario Base (mensal)" value={baseSalary} onChange={setBaseSalary} />
+                      <div className="iasconta-salary-base">
+                        <Field label="Salario Base (mensal)" value={baseSalary} onChange={setBaseSalary} />
+                      </div>
                       <Field label="Trienio" value={trienio} onChange={setTrienio} />
                       <p className="text-xs text-gray-500">Insira o valor do trienio conforme sua folha</p>
                     </div>
@@ -355,7 +358,9 @@ export default function Salary() {
                   <SectionHeader title="Adicionais (Beneficios)" sectionKey="adicionais" open={openSections.adicionais} onToggle={toggleSection} icon={<TrendingUp className="w-4 h-4" />} />
                   {openSections.adicionais && (
                     <div className="pb-4 pt-1 space-y-4">
-                      <Field label="Periculosidade/Insalubridade" value={periculosidade} onChange={setPericulosidade} />
+                      <div className="iasconta-salary-additions">
+                        <Field label="Periculosidade/Insalubridade" value={periculosidade} onChange={setPericulosidade} />
+                      </div>
                       <Field label="Adicional Noturno" value={adicionalNoturno} onChange={setAdicionalNoturno} />
                       <Field label="Hora Extra" value={horaExtra} onChange={setHoraExtra} />
                       <Field label="Comissao/Bonus" value={comissao} onChange={setComissao} />

@@ -171,7 +171,7 @@ export default function FixedIncomesCard({ className = '' }: { className?: strin
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 iasconta-fixed-incomes-add">
           <input
             value={newName}
             onChange={(e) => setNewName(e.target.value)}

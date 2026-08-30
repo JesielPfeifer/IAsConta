@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useDashboard } from '../hooks/useDashboard';
 import { useTransactions } from '../hooks/useTransactions';
-import { ArrowUpRight, ArrowDownRight, Wallet, PieChart, BarChart3, Clock, CheckSquare, CreditCard, Lightbulb, Calendar, TrendingUp, TrendingDown, DollarSign, Receipt } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, Wallet, PieChart, BarChart3, Clock, CheckSquare, CreditCard, Lightbulb, Calendar, TrendingUp, TrendingDown, DollarSign, Receipt, X } from 'lucide-react';
 import { PieChart as RePie, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import dayjs from 'dayjs';
 import { api } from '../api/client';
@@ -28,6 +28,15 @@ export default function Dashboard() {
   const [pixLoading, setPixLoading] = useState(false);
   const [pixAddedIds, setPixAddedIds] = useState<string[]>([]);
   const [pixAddingId, setPixAddingId] = useState<string | null>(null);
+  // Dispensa o card de PIX/DOC por mês (localStorage: volta no mês seguinte)
+  const currentMonth = dayjs().format('YYYY-MM');
+  const [pixReceiptDismissed, setPixReceiptDismissed] = useState(
+    () => localStorage.getItem('pixReceiptDismissMonth') === currentMonth
+  );
+  const dismissPixReceipt = () => {
+    localStorage.setItem('pixReceiptDismissMonth', currentMonth);
+    setPixReceiptDismissed(true);
+  };
 
   // PIX/DOC recebidos via Pluggy que ainda não viraram entrada manual — o
   // usuário decide se quer adicionar como receita (regra: só fatura de cartão
@@ -380,11 +389,21 @@ export default function Dashboard() {
           icon={<DollarSign className="h-5 w-5 text-emerald-400" />}
           iconBg="bg-emerald-500/10"
         >
-          {pixReceived.length > 0 && (
+          {pixReceived.length > 0 && !pixReceiptDismissed && (
             <div className="mb-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
-              <p className="text-sm text-emerald-300 font-medium mb-2">
-                Você recebeu {pixReceived.length} {pixReceived.length === 1 ? 'PIX/DOC' : 'PIX/DOC'} via Open Finance neste mês. Deseja adicionar como entrada?
-              </p>
+              <div className="flex items-start justify-between gap-3">
+                <p className="text-sm text-emerald-300 font-medium mb-2">
+                  Você recebeu {pixReceived.length} {pixReceived.length === 1 ? 'PIX/DOC' : 'PIX/DOC'} via Open Finance neste mês. Deseja adicionar como entrada?
+                </p>
+                <button
+                  onClick={dismissPixReceipt}
+                  aria-label="Não adicionar agora"
+                  title="Não adicionar agora"
+                  className="shrink-0 rounded-lg p-1 text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
               <ul className="space-y-1.5">
                 {pixReceived.map((t) => (
                   <li key={t.id} className="flex items-center justify-between gap-3 text-sm">
@@ -402,6 +421,14 @@ export default function Dashboard() {
                   </li>
                 ))}
               </ul>
+              <div className="flex justify-end mt-3">
+                <button
+                  onClick={dismissPixReceipt}
+                  className="px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:text-white hover:bg-white/5 border border-white/10 transition-colors"
+                >
+                  Agora não
+                </button>
+              </div>
             </div>
           )}
           {incomeTx.length > 0 ? (
