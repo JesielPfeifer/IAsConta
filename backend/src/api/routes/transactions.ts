@@ -282,6 +282,9 @@ router.get("/pix-received", async (req: Request, res: Response) => {
         source: "PLUGGY",
         isInternalTransfer: false,
         isHidden: false,
+        // Convertidas para receita manual (ou editadas pelo usuário) não são
+        // mais candidatas: o popup não pode oferecer de novo o mesmo PIX.
+        manuallyEdited: false,
         date: { gte: start, lt: end },
       },
       orderBy: { date: "desc" },
@@ -299,27 +302,62 @@ router.get("/pix-received", async (req: Request, res: Response) => {
 router.post("/pix-received/:id/add", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
+    // Somente transações PLUGGY, de entrada, tipo PIX recebido e ainda não
+    // convertidas podem virar receita manual — repetições não geram duplicatas.
     const tx = await prisma.transaction.findFirst({
-      where: { id: req.params.id, userId: user.id } as any,
+      where: {
+        id: req.params.id,
+        userId: user.id,
+        source: "PLUGGY",
+        type: "INCOME",
+        isHidden: false,
+        isInternalTransfer: false,
+        manuallyEdited: false,
+      } as any,
     });
-    if (!tx) {
+    if (!tx || !PIX_RECEIVED_RE.test(tx.description)) {
+      // Idempotente: repetição (duplo clique, aba aberta em duas telas)
+      // encontra a transação já convertida e responde 409 em vez de duplicar.
+      const already = await prisma.transaction.findFirst({
+        where: { id: req.params.id as string, userId: user.id },
+        select: { id: true },
+      });
+      if (already) {
+        res.status(409).json({ error: "PIX já adicionado como receita" });
+        return;
+      }
       res.status(404).json({ error: "Transação não encontrada" });
       return;
     }
-    const created = await prisma.transaction.create({
-      data: {
-        amount: tx.amount,
-        type: "INCOME",
-        description: tx.description,
-        date: tx.date,
-        source: "MANUAL",
-        paymentMethod: tx.paymentMethod,
-        person: tx.person,
-        isShared: tx.isShared,
-        categoryId: tx.categoryId,
-        userId: user.id,
-      },
+    // Transação atômica: marca a original como convertida (manuallyEdited
+    // preserva a linha no re-sync e a tira dos candidatos) e cria a receita
+    // MANUAL no mesmo passo. O updateMany condicional garante que só UMA
+    // requisição vence a corrida — a perdedora conta 0 e não cria nada.
+    const created = await prisma.$transaction(async (txn) => {
+      const marcado = await txn.transaction.updateMany({
+        where: { id: tx.id, userId: user.id, manuallyEdited: false },
+        data: { manuallyEdited: true },
+      });
+      if (marcado.count === 0) return null;
+      return txn.transaction.create({
+        data: {
+          amount: tx.amount,
+          type: "INCOME",
+          description: tx.description,
+          date: tx.date,
+          source: "MANUAL",
+          paymentMethod: tx.paymentMethod,
+          person: tx.person,
+          isShared: tx.isShared,
+          categoryId: tx.categoryId,
+          userId: user.id,
+        },
+      });
     });
+    if (!created) {
+      res.status(409).json({ error: "PIX já adicionado como receita" });
+      return;
+    }
     res.status(201).json(created);
   } catch (err) {
     logger.error(err);
@@ -489,15 +527,35 @@ router.put("/:id", async (req: Request, res: Response) => {
  * semântica da exclusão física de parceladas). Caso contrário, apenas a linha.
  */
 function buildHiddenScopeWhere(
-  existing: { id?: string; installmentGroupId: string | null; totalInstallments: number },
+  existing: {
+    id?: string;
+    installmentGroupId: string | null;
+    totalInstallments: number;
+    pluggyAccountId?: string | null;
+    description?: string | null;
+  },
   userId: string
 ): Record<string, unknown> {
   if (existing.installmentGroupId) {
-    return {
+    // A série real usa installmentGroupId (hash Pluggy); as PROJEÇÕES de
+    // parcelas futuras criadas pelo sync usam identidade própria
+    // ("desc-<conta>-<base64>", ver pluggy-sync.ts). Oculta as duas — sem
+    // isso as projeções ficariam visíveis e entrariam na previsão depois de
+    // o usuário ocultar a transação importada.
+    const scope: Record<string, unknown> = {
       userId,
-      installmentGroupId: existing.installmentGroupId,
       source: "PLUGGY",
+      OR: [{ installmentGroupId: existing.installmentGroupId }],
     };
+    if (existing.pluggyAccountId) {
+      const descKey = (existing.description || "")
+        .replace(/\s+\d+\/\d+\s*$/, "")
+        .trim()
+        .toLowerCase();
+      const groupPrefix = `desc-${existing.pluggyAccountId}-${Buffer.from(descKey).toString("base64url")}`;
+      (scope.OR as Array<Record<string, unknown>>).push({ installmentGroupId: groupPrefix });
+    }
+    return scope;
   }
   return { userId, id: existing.id };
 }
@@ -800,19 +858,35 @@ router.post("/:id/salary-review", async (req: Request, res: Response) => {
     }
     if (action === "update") {
       const valor = Math.abs(amount ?? tx.amount);
-      const fixed = await prisma.fixedIncome.findMany({
-        where: {
-          userId: user.id,
-          active: true,
-          OR: [
-            { name: { contains: "salario", mode: "insensitive" } },
-            { name: { contains: "salário", mode: "insensitive" } },
-          ],
-        },
-      });
-      for (const f of fixed) {
+      // A revisão aponta para a ÚNICA FixedIncome que gerou a divergência
+      // (gravada pelo sync em salaryFixedIncomeId). Fallback para linhas
+      // antigas: renda salarial ativa mais próxima do valor recebido. Nunca
+      // atualiza todas as rendas com nome de salário — com um salário por
+      // cônjuge, isso sobrescreveria a renda da outra pessoa.
+      const alvo =
+        tx.salaryFixedIncomeId != null
+          ? await prisma.fixedIncome.findFirst({
+              where: { id: tx.salaryFixedIncomeId, userId: user.id },
+            })
+          : null;
+      const candidatas = alvo
+        ? [alvo]
+        : await prisma.fixedIncome.findMany({
+            where: {
+              userId: user.id,
+              active: true,
+              OR: [
+                { name: { contains: "salario", mode: "insensitive" } },
+                { name: { contains: "salário", mode: "insensitive" } },
+              ],
+            },
+          });
+      if (candidatas.length > 0) {
+        const escolhida = candidatas.reduce((melhor, f) =>
+          Math.abs(f.amount - valor) < Math.abs(melhor.amount - valor) ? f : melhor
+        );
         await prisma.fixedIncome.update({
-          where: { id: f.id },
+          where: { id: escolhida.id },
           data: { amount: valor },
         });
       }
