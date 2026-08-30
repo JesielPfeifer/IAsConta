@@ -5,6 +5,7 @@ import BillForm from '../components/BillForm';
 import ConfirmModal from '../components/ConfirmModal';
 import { Plus, Check, Trash2, Pencil, X, ChevronDown, Calendar, Clock, CheckCircle2, AlertTriangle, type LucideIcon } from 'lucide-react';
 import dayjs from 'dayjs';
+import { useOnboarding } from '../hooks/useOnboarding';
 
 interface IncomeEntry {
   id: string;
@@ -73,6 +74,12 @@ function CustomSelect({ value, onChange, options, icon: Icon }: {
 }
 
 export default function Income() {
+
+  // ── Onboarding interativo (primeira visita) ──
+  useOnboarding('income', [
+    { target: '.iasconta-income-new', title: 'Cadastro manual', description: 'Use “Nova Receita” para registrar valores a receber: aluguel, venda, pagamento de amigo — com vencimento e pessoa responsável.' },
+    { target: '.iasconta-received-toggle', title: 'Marcar como recebido', description: 'Quando o dinheiro cair na conta, clique no check ($): a entrada fica marcada como Recebida e sai dos pendentes do mês.' },
+  ]);
   const [entries, setEntries] = useState<IncomeEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -209,7 +216,7 @@ export default function Income() {
           )}
           <button
             onClick={() => setShowForm(true)}
-            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-gray-950 font-medium px-4 py-2 rounded-xl text-sm transition-all duration-200 hover:scale-[1.02] shadow-lg shadow-emerald-500/20"
+            className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-gray-950 font-medium px-4 py-2 rounded-xl text-sm transition-all duration-200 hover:scale-[1.02] shadow-lg shadow-emerald-500/20 iasconta-income-new"
           >
             <Plus className="w-4 h-4" /> Nova Receita
           </button>
@@ -350,7 +357,7 @@ export default function Income() {
                         <td className="px-4 py-3 text-right">
                           <div className="flex items-center justify-end gap-1">
                             {!b.isReceived && (
-                              <button onClick={() => toggleReceived(b)} className="p-1.5 hover:bg-emerald-500/10 rounded-lg text-gray-400 hover:text-emerald-400 transition-colors" title="Marcar como recebido">
+                              <button onClick={() => toggleReceived(b)} className="p-1.5 hover:bg-emerald-500/10 rounded-lg text-gray-400 hover:text-emerald-400 transition-colors iasconta-received-toggle" title="Marcar como recebido">
                                 <Check className="w-4 h-4" />
                               </button>
                             )}

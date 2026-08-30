@@ -66,6 +66,26 @@ model Transaction {
   // quando a data do débito difere do mês a que a despesa se refere (ex.:
   // prestação habitacional debitada em 05/08 referente a julho). Null = usa date.
   referenceMonth     String?
+  // Soft-delete: exclusão de transação importada do Pluggy vira "ocultar" em
+  // vez de apagar a linha. Mantém o @@unique([userId, externalId]) íntegro — o
+  // sync encontra a linha oculta pelo externalId e PULA a reimportação,
+  // respeitando a exclusão do usuário. Ocultas somem de todas as listas
+  // (isHidden=false) e podem ser revisadas/restauradas na aba "Ocultas".
+  isHidden           Boolean         @default(false)
+  hiddenAt           DateTime?
+  // Transferência entre contas próprias do usuário (ex.: Nubank ↔ Caixa).
+  // Não é receita nem despesa — apenas movimento de dinheiro entre contas
+  // próprias. Excluída dos totais de despesa/receita do dashboard.
+  isInternalTransfer Boolean         @default(false)
+  // TED de salário recebida com valor diferente da Rendas Fixas configurada:
+  // o usuário decide se atualiza o valor do mês vigente. Enquanto não decide,
+  // a transação fica marcada para exibir um prompt na UI.
+  salaryReviewPending Boolean        @default(false)
+  // FixedIncome (renda fixa salarial) que gerou esta revisão — gravada pelo
+  // sync quando detecta divergência. O salary-review atualiza SOMENTE esse
+  // registro (pode haver um salário por pessoa do casal; atualizar todos
+  // sobrescreveria a renda do outro cônjuge).
+  salaryFixedIncomeId String?
   userId      String
   user        User            @relation(fields: [userId], references: [id])
   createdAt   DateTime        @default(now())

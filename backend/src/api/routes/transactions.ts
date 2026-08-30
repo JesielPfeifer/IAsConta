@@ -1,3 +1,4 @@
+import dayjs from 'dayjs';
 import { logger } from '../../lib/logger.js';
 import { Router, Request, Response } from "express";
 import { z } from "zod";
@@ -86,7 +87,7 @@ router.get("/card-cycle", async (req: Request, res: Response) => {
     // aparece UMA vez na UI, independente de ter transações Pluggy, manuais ou
     // ambas.
     const pmRows = await prisma.transaction.findMany({
-      where: { userId: user.id, isCreditCard: true },
+      where: { userId: user.id, isCreditCard: true, isHidden: false, isInternalTransfer: false },
       select: { pluggyAccountId: true, paymentMethod: true },
       distinct: ["paymentMethod"],
     });
@@ -113,6 +114,7 @@ router.get("/card-cycle", async (req: Request, res: Response) => {
         where: {
           userId: user.id,
           isCreditCard: true,
+          isHidden: false,
           paymentMethod: pm,
           OR: [
             { billForecastMonth: monthKey },
@@ -161,9 +163,19 @@ router.get("/card-cycle", async (req: Request, res: Response) => {
 router.get("/", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
-    const { month, categoryId, person, type, source, isShared, paymentMethod } = req.query;
+    const { month, categoryId, person, type, source, isShared, paymentMethod, hidden } = req.query;
 
     const where: Record<string, unknown> = { userId: user.id };
+
+    // ?hidden=true lista APENAS as ocultas (aba "Ocultas" da UI). Sem o
+    // parâmetro (ou hidden=false), ocultas ficam de fora — exclusão do
+    // usuário não pode ressuscitar na listagem normal nem nos totais.
+    where.isHidden = hidden === "true";
+    // Transferências entre contas próprias (Nubank ↔ Caixa) não são gastos
+    // nem receitas — saem da listagem normal da aba Transações (o foco é a
+    // fatura do cartão de crédito). A aba "Ocultas" continua mostrando as
+    // transações ocultas pelo usuário; as internas são outro conceito.
+    if (hidden !== "true") where.isInternalTransfer = false;
 
     if (month) {
       const startOfMonth = new Date(`${month}-01T00:00:00.000Z`);
@@ -197,8 +209,37 @@ router.get("/", async (req: Request, res: Response) => {
     if (categoryId) where.categoryId = categoryId as string;
     if (person) where.person = person as string;
     if (type) where.type = type as string;
-    if (source) where.source = source as string;
+    if (source) (where as any).source = Array.isArray(source) ? source[0] : source;
     if (paymentMethod) where.paymentMethod = paymentMethod as string;
+
+    // REGRA (definida pelo usuário): a aba Transações foca em FATURAS DE CARTÃO
+    // DE CRÉDITO. PIX enviado/recebido, TED e pagamentos em débito que vêm do
+    // Pluggy (Open Finance) NÃO aparecem automaticamente — só entram se o
+    // usuário criar a transação manualmente (source != PLUGGY). Assim o total
+    // de despesas reflete apenas compras de cartão + lançamentos manuais.
+    if (hidden !== "true") {
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : []),
+        {
+          OR: [
+            { source: { not: "PLUGGY" } },
+            {
+              AND: [
+                { source: "PLUGGY" },
+                {
+                  OR: [
+                    { isCreditCard: true },
+                    { description: { contains: "pagamento de fatura", mode: "insensitive" } },
+                    { description: { contains: "pagamento efetuado", mode: "insensitive" } },
+                    { description: { contains: "pagamento cartao", mode: "insensitive" } },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ];
+    }
     if (isShared !== undefined) where.isShared = isShared === "true";
 
     const transactions = await prisma.transaction.findMany({
@@ -208,6 +249,161 @@ router.get("/", async (req: Request, res: Response) => {
     });
 
     res.json(transactions);
+  } catch (err) {
+    logger.error(err);
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+
+// PIX/DOC recebidos via Pluggy que ainda NÃO viraram entrada manual. O frontend
+// mostra um banner perguntando se o usuário quer adicionar como receita.
+const PIX_RECEIVED_RE = /(?:pix recebido|doc recebido|transferencia recebida|recebimento ted|ted )/i;
+
+router.get("/pix-received", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    const { month } = req.query;
+    let start: Date;
+    let end: Date;
+    if (month && /^\d{4}-\d{2}$/.test(month as string)) {
+      const [y, m] = (month as string).split("-").map(Number);
+      start = new Date(y, m - 1, 1);
+      end = new Date(y, m, 1);
+    } else {
+      const now = new Date();
+      start = new Date(now.getFullYear(), now.getMonth(), 1);
+      end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    }
+    const rows = await prisma.transaction.findMany({
+      where: {
+        userId: user.id,
+        type: "INCOME",
+        source: "PLUGGY",
+        isInternalTransfer: false,
+        isHidden: false,
+        // Convertidas para receita manual (ou editadas pelo usuário) não são
+        // mais candidatas: o popup não pode oferecer de novo o mesmo PIX.
+        manuallyEdited: false,
+        date: { gte: start, lt: end },
+      },
+      orderBy: { date: "desc" },
+    });
+    const candidates = rows.filter((t) => PIX_RECEIVED_RE.test(t.description));
+    res.json(candidates);
+  } catch (err) {
+    logger.error(err);
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+// Converte um PIX recebido do Pluggy em uma entrada manual (source=MANUAL),
+// para que passe a contar como receita de fato.
+router.post("/pix-received/:id/add", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    // Somente transações PLUGGY, de entrada, tipo PIX recebido e ainda não
+    // convertidas podem virar receita manual — repetições não geram duplicatas.
+    const tx = await prisma.transaction.findFirst({
+      where: {
+        id: req.params.id,
+        userId: user.id,
+        source: "PLUGGY",
+        type: "INCOME",
+        isHidden: false,
+        isInternalTransfer: false,
+        manuallyEdited: false,
+      } as any,
+    });
+    if (!tx || !PIX_RECEIVED_RE.test(tx.description)) {
+      // Idempotente: repetição (duplo clique, aba aberta em duas telas)
+      // encontra a transação já convertida e responde 409 em vez de duplicar.
+      const already = await prisma.transaction.findFirst({
+        where: { id: req.params.id as string, userId: user.id },
+        select: { id: true },
+      });
+      if (already) {
+        res.status(409).json({ error: "PIX já adicionado como receita" });
+        return;
+      }
+      res.status(404).json({ error: "Transação não encontrada" });
+      return;
+    }
+    // Transação atômica: marca a original como convertida (manuallyEdited
+    // preserva a linha no re-sync e a tira dos candidatos) e cria a receita
+    // MANUAL no mesmo passo. O updateMany condicional garante que só UMA
+    // requisição vence a corrida — a perdedora conta 0 e não cria nada.
+    const created = await prisma.$transaction(async (txn) => {
+      const marcado = await txn.transaction.updateMany({
+        where: { id: tx.id, userId: user.id, manuallyEdited: false },
+        data: { manuallyEdited: true },
+      });
+      if (marcado.count === 0) return null;
+      return txn.transaction.create({
+        data: {
+          amount: tx.amount,
+          type: "INCOME",
+          description: tx.description,
+          date: tx.date,
+          source: "MANUAL",
+          paymentMethod: tx.paymentMethod,
+          person: tx.person,
+          isShared: tx.isShared,
+          categoryId: tx.categoryId,
+          userId: user.id,
+        },
+      });
+    });
+    if (!created) {
+      res.status(409).json({ error: "PIX já adicionado como receita" });
+      return;
+    }
+    res.status(201).json(created);
+  } catch (err) {
+    logger.error(err);
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+router.get("/hidden", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    // Lista explícita das ocultas (mesma forma da listagem normal, mas
+    // isHidden=true). A aba "Ocultas" usa esta rota para revisar/restaurar.
+    const transactions = await prisma.transaction.findMany({
+      where: { userId: user.id, isHidden: true },
+      include: { category: true },
+      orderBy: { hiddenAt: "desc" },
+    });
+    res.json(transactions);
+  } catch (err) {
+    logger.error(err);
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+router.post("/hidden/:id/restore", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    const { id } = req.params;
+
+    const existing = await prisma.transaction.findFirst({
+      where: { id: id as string, userId: user.id, isHidden: true },
+    });
+
+    if (!existing) {
+      res.status(404).json({ error: "Transação oculta não encontrada" });
+      return;
+    }
+
+    // Restaurar = voltar à lista normal. Se a transação ainda existir no
+    // Pluggy, o sync volta a atualizá-la normalmente (dedupe por externalId).
+    await prisma.transaction.update({
+      where: { id: existing.id },
+      data: { isHidden: false, hiddenAt: null },
+    });
+
+    res.json({ message: "Transação restaurada" });
   } catch (err) {
     logger.error(err);
     res.status(500).json({ error: "Erro interno" });
@@ -325,6 +521,45 @@ router.put("/:id", async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Escopo de "ocultar em grupo" para uma transação: quando ela pertence a uma
+ * série de parcelas, TODAS as parcelas da série são ocultadas junto (mesma
+ * semântica da exclusão física de parceladas). Caso contrário, apenas a linha.
+ */
+function buildHiddenScopeWhere(
+  existing: {
+    id?: string;
+    installmentGroupId: string | null;
+    totalInstallments: number;
+    pluggyAccountId?: string | null;
+    description?: string | null;
+  },
+  userId: string
+): Record<string, unknown> {
+  if (existing.installmentGroupId) {
+    // A série real usa installmentGroupId (hash Pluggy); as PROJEÇÕES de
+    // parcelas futuras criadas pelo sync usam identidade própria
+    // ("desc-<conta>-<base64>", ver pluggy-sync.ts). Oculta as duas — sem
+    // isso as projeções ficariam visíveis e entrariam na previsão depois de
+    // o usuário ocultar a transação importada.
+    const scope: Record<string, unknown> = {
+      userId,
+      source: "PLUGGY",
+      OR: [{ installmentGroupId: existing.installmentGroupId }],
+    };
+    if (existing.pluggyAccountId) {
+      const descKey = (existing.description || "")
+        .replace(/\s+\d+\/\d+\s*$/, "")
+        .trim()
+        .toLowerCase();
+      const groupPrefix = `desc-${existing.pluggyAccountId}-${Buffer.from(descKey).toString("base64url")}`;
+      (scope.OR as Array<Record<string, unknown>>).push({ installmentGroupId: groupPrefix });
+    }
+    return scope;
+  }
+  return { userId, id: existing.id };
+}
+
 router.delete("/:id", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
@@ -339,6 +574,19 @@ router.delete("/:id", async (req: Request, res: Response) => {
       // 404 em exclusões em lote/parceladas, onde a exclusão em cascata de uma
       // parcela já removeu as irmãs selecionadas.
       res.json({ message: "Transação já removida" });
+      return;
+    }
+
+    // Transações importadas do Pluggy (e projeções de parcelas geradas pelo
+    // sync) NÃO são apagadas fisicamente: viram "ocultas" (soft-delete). O
+    // externalId continua no banco, então o próximo sync encontra a linha e
+    // PULA a reimportação — a exclusão do usuário sobrevive ao re-sincronismo.
+    if (existing.source === "PLUGGY") {
+      await prisma.transaction.updateMany({
+        data: { isHidden: true, hiddenAt: new Date() },
+        where: buildHiddenScopeWhere(existing, user.id),
+      });
+      res.json({ message: "Transação removida" });
       return;
     }
 
@@ -587,4 +835,71 @@ botRouter.put("/:id", async (req: Request, res: Response) => {
 });
 
 export { botRouter };
+
+// Revisão de salário: TED de salário veio com valor diferente da Rendas Fixas.
+// action=update → atualiza a FixedIncome de salário do mês vigente e limpa a flag.
+// action=dismiss → apenas limpa a flag (mantém a renda fixa atual).
+router.post("/:id/salary-review", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    const body = req.body as { action?: string; amount?: number };
+    const action = body.action;
+    const amount = body.amount;
+    if (!action || !["update", "dismiss"].includes(action)) {
+      res.status(400).json({ error: "action inválida" });
+      return;
+    }
+    const tx = await prisma.transaction.findFirst({
+      where: { id: req.params.id, userId: user.id, salaryReviewPending: true } as any,
+    });
+    if (!tx) {
+      res.status(404).json({ error: "Transação de revisão não encontrada" });
+      return;
+    }
+    if (action === "update") {
+      const valor = Math.abs(amount ?? tx.amount);
+      // A revisão aponta para a ÚNICA FixedIncome que gerou a divergência
+      // (gravada pelo sync em salaryFixedIncomeId). Fallback para linhas
+      // antigas: renda salarial ativa mais próxima do valor recebido. Nunca
+      // atualiza todas as rendas com nome de salário — com um salário por
+      // cônjuge, isso sobrescreveria a renda da outra pessoa.
+      const alvo =
+        tx.salaryFixedIncomeId != null
+          ? await prisma.fixedIncome.findFirst({
+              where: { id: tx.salaryFixedIncomeId, userId: user.id },
+            })
+          : null;
+      const candidatas = alvo
+        ? [alvo]
+        : await prisma.fixedIncome.findMany({
+            where: {
+              userId: user.id,
+              active: true,
+              OR: [
+                { name: { contains: "salario", mode: "insensitive" } },
+                { name: { contains: "salário", mode: "insensitive" } },
+              ],
+            },
+          });
+      if (candidatas.length > 0) {
+        const escolhida = candidatas.reduce((melhor, f) =>
+          Math.abs(f.amount - valor) < Math.abs(melhor.amount - valor) ? f : melhor
+        );
+        await prisma.fixedIncome.update({
+          where: { id: escolhida.id },
+          data: { amount: valor },
+        });
+      }
+    }
+    await prisma.transaction.update({
+      where: { id: tx.id },
+      data: { salaryReviewPending: false },
+    });
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 export default router;

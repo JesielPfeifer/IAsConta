@@ -12,6 +12,7 @@ import Investments from './pages/Investments';
 import Salary from './pages/Salary';
 import Setup from './pages/Setup';
 import Annual from './pages/Annual';
+import Help from './pages/Help';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -53,6 +54,7 @@ export default function App() {
         <Route path="salary" element={<Salary />} />
         <Route path="setup" element={<Setup />} />
         <Route path="annual" element={<Annual />} />
+        <Route path="help" element={<Help />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

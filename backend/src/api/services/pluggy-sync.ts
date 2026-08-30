@@ -52,6 +52,10 @@ export interface SyncResult {
   accounts: number;
   transactionsCreated: number;
   transactionsUpdated: number;
+  // Transações que o Pluggy ainda reporta mas que o usuário EXCLUIU na UI
+  // (soft-delete isHidden=true): puladas na reimportação para respeitar a
+  // exclusão. Logadas e retornadas no resultado do sync.
+  skippedHidden: number;
   billsCreated: number;
   billsUpdated: number;
   errors: string[];
@@ -364,6 +368,7 @@ export async function syncItem(itemId: string, userId: string): Promise<SyncResu
     accounts: 0,
     transactionsCreated: 0,
     transactionsUpdated: 0,
+    skippedHidden: 0,
     billsCreated: 0,
     billsUpdated: 0,
     errors: [],
@@ -504,6 +509,96 @@ export async function syncItem(itemId: string, userId: string): Promise<SyncResu
 // ---------------------------------------------------------------
 // Bank accounts (checking/savings) -> plain transactions
 // ---------------------------------------------------------------
+
+/**
+ * Detecta se uma transação recém-sincronizada é transferência interna
+ * (mesmo usuário, entre contas próprias) olhando o banco por um par
+ * exato (mesmo valor ±3 dias, type oposto, conta Pluggy diferente, ambas
+ * "transfer-like"). Marca isInternalTransfer=true para não inflar totais.
+ */
+const TRANSFER_HINT_RE =
+  /(?:pix|transfer|ted|doc|envio|recebimento|deb\s*pix|entre contas|chave)/i;
+
+export async function detectInternalTransfer(
+  userId: string,
+  accountId: string,
+  type: string,
+  amount: number,
+  date: Date,
+  description: string
+): Promise<boolean> {
+  if (!TRANSFER_HINT_RE.test(description)) return false;
+  const pair = await prisma.transaction.findFirst({
+    where: internalTransferPairWhere(userId, accountId, type, amount, date) as any,
+  });
+  return !!pair;
+}
+
+
+/**
+ * Detecta se uma transação é uma TED de salário cujo valor NÃO bate com a
+ * Rendas Fixas (salário) configurada pelo usuário. Retorna o id da ÚNICA
+ * FixedIncome que gerou a divergência (ou null quando):
+ *  - a descrição não indica recebimento de salário/TED
+ *  - não há FixedIncome de salário ativa
+ *  - alguma das rendas salariais bate EXATAMENTE com o valor recebido
+ * Quando nenhuma bate, escolhe a renda MAIS PRÓXIMA do valor — é ela que a
+ * revisão (salary-review) vai atualizar, sem tocar nas demais (o casal pode
+ * ter um salário por pessoa).
+ */
+const SALARY_RE = /(?:salario|salário|ted salario|recebimento ted|folha|pagamento de salario)/i;
+
+export async function detectSalaryMismatch(
+  userId: string,
+  amount: number,
+  description: string
+): Promise<string | null> {
+  if (!SALARY_RE.test(description)) return null;
+  const fixed = await prisma.fixedIncome.findMany({
+    where: {
+      userId,
+      active: true,
+      OR: [
+        { name: { contains: "salario", mode: "insensitive" } },
+        { name: { contains: "salário", mode: "insensitive" } },
+      ],
+    },
+  });
+  if (fixed.length === 0) return null;
+  // Se UMA das rendas corresponde ao valor recebido, não há divergência (o
+  // some() antigo marcava revisão até quando o outro salário do casal batia).
+  const exata = fixed.find((f) => Math.abs(f.amount - amount) < 0.01);
+  if (exata) return null;
+  const maisProxima = fixed.reduce((melhor, f) =>
+    Math.abs(f.amount - amount) < Math.abs(melhor.amount - amount) ? f : melhor
+  );
+  return maisProxima.id;
+}
+
+/** Candidata a perna OPOSTA de uma transferência interna: mesmo valor ±3 dias,
+ * tipo oposto, conta Pluggy diferente e origem do sync. Usada para detectar
+ * o par e para (re)classificar a perna oposta quando ela já está no banco. */
+function internalTransferPairWhere(
+  userId: string,
+  accountId: string,
+  type: string,
+  amount: number,
+  date: Date
+): Record<string, unknown> {
+  const days = 3;
+  const since = new Date(date.getTime() - days * 86400000);
+  const until = new Date(date.getTime() + days * 86400000);
+  return {
+    userId,
+    type: type === "EXPENSE" ? "INCOME" : "EXPENSE",
+    pluggyAccountId: { not: accountId },
+    amount: { equals: amount },
+    date: { gte: since, lte: until },
+    source: "PLUGGY",
+    isHidden: false,
+  };
+}
+
 async function syncBankAccount(
   client: ReturnType<typeof createPluggyClient>,
   account: PluggyAccount,
@@ -555,11 +650,44 @@ async function syncBankAccount(
       ? await findOrCreateCategory(categoryName, userId)
       : null;
 
+    const amount = resolveAmount(tx);
+    const transferDate = new Date(tx.date);
+    const isInternalTransfer = await detectInternalTransfer(
+      userId,
+      account.id,
+      type,
+      amount,
+      transferDate,
+      tx.description
+    );
+    // Revisão de salário: id da ÚNICA FixedIncome que diverge (null = ok).
+    const salaryMismatch = await detectSalaryMismatch(
+      userId,
+      amount,
+      tx.description
+    );
+    // Quando a perna OPOSTA da transferência interna já está no banco
+    // (importada antes desta), classifica também ela — senão uma perna fica
+    // isInternalTransfer=false e continua aparecendo nos totais até o próximo
+    // sync da outra conta.
+    if (isInternalTransfer) {
+      await prisma.transaction.updateMany({
+        where: internalTransferPairWhere(
+          userId,
+          account.id,
+          type,
+          amount,
+          transferDate
+        ) as any,
+        data: { isInternalTransfer: true },
+      });
+    }
+
     const data = {
-      amount: resolveAmount(tx),
+      amount,
       type,
       description: tx.description,
-      date: new Date(tx.date),
+      date: transferDate,
       source: "PLUGGY" as const,
       paymentMethod,
       // Account owner (Open Finance holder name) → link to husband/wife.
@@ -570,9 +698,19 @@ async function syncBankAccount(
       pluggyAccountId: account.id,
       externalId: tx.id,
       userId,
+      isInternalTransfer,
+      salaryReviewPending: !!salaryMismatch,
+      salaryFixedIncomeId: salaryMismatch,
     };
 
     if (existing) {
+      // Oculta (exclusão do usuário sobrevive ao re-sync): PULAR a
+      // reimportação — nem recriar, nem atualizar. O externalId continua no
+      // banco justamente para o dedupe chegar aqui e respeitar a exclusão.
+      if (existing.isHidden) {
+        result.skippedHidden++;
+        continue;
+      }
       // Update mutable fields (description/amount may change on re-sync).
       // Rows the user edited manually keep their values — only genuinely new
       // Pluggy data (e.g. PENDING → POSTED) creates/updates untouched rows.
@@ -582,7 +720,13 @@ async function syncBankAccount(
         existing.description !== data.description ||
         existing.date.getTime() !== data.date.getTime() ||
         existing.type !== type ||
-        existing.person !== data.person;
+        existing.person !== data.person ||
+        // Classificações recalculadas também persistem: transferência interna
+        // e revisão de salário podem mudar entre syncs (o par oposto chega
+        // depois, o usuário atualiza a renda fixa, etc.).
+        existing.isInternalTransfer !== data.isInternalTransfer ||
+        existing.salaryReviewPending !== data.salaryReviewPending ||
+        existing.salaryFixedIncomeId !== data.salaryFixedIncomeId;
       if (changed) {
         await prisma.transaction.update({
           where: { id: existing.id },
@@ -592,6 +736,9 @@ async function syncBankAccount(
             date: data.date,
             type,
             person: data.person,
+            isInternalTransfer: data.isInternalTransfer,
+            salaryReviewPending: data.salaryReviewPending,
+            salaryFixedIncomeId: data.salaryFixedIncomeId,
           },
         });
         result.transactionsUpdated++;
@@ -876,6 +1023,12 @@ async function syncCreditCard(
       }
     }
     if (existing) {
+      // Oculta (exclusão do usuário sobrevive ao re-sync): PULAR — nem
+      // atualizar, nem reimportar. Mesma regra da conta corrente.
+      if (existing.isHidden) {
+        result.skippedHidden++;
+        continue;
+      }
       // Update sync-driven fields (keep the user's category edits). Rows the
       // user edited manually keep their values — no overwrite on re-sync.
       if (existing.manuallyEdited) continue;
@@ -1015,6 +1168,7 @@ export async function syncAllForUser(userId: string): Promise<SyncResult[]> {
         accounts: 0,
         transactionsCreated: 0,
         transactionsUpdated: 0,
+        skippedHidden: 0,
         billsCreated: 0,
         billsUpdated: 0,
         errors: [(err as Error).message],
@@ -1049,7 +1203,7 @@ export async function handlePluggyWebhook(body: Record<string, unknown>): Promis
 
   try {
     const result = await syncItem(itemId, connection.userId);
-    return `${eventName || "webhook"}: ${result.transactionsCreated} criadas, ${result.transactionsUpdated} atualizadas, ${result.billsCreated} faturas criadas`;
+    return `${eventName || "webhook"}: ${result.transactionsCreated} criadas, ${result.transactionsUpdated} atualizadas, ${result.skippedHidden} ocultas puladas, ${result.billsCreated} faturas criadas`;
   } catch (err) {
     logger.error(`[pluggy-webhook] sync falhou para item ${itemId}:`, err);
     return null;

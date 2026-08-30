@@ -45,13 +45,20 @@ function descriptionsMatchTransferPair(a: string, b: string): boolean {
 export function filterInternalTransfers<T extends { id: string; type: string; amount: number; date: Date; description: string; pluggyAccountId?: string | null }>(
   transactions: T[]
 ): T[] {
-  const transferCandidates = transactions.filter(
-    (tx) => TRANSFER_RE.test(tx.description) && tx.pluggyAccountId
-  );
+  // TRANSFER_HINT_RE: any description that smells like a transfer between
+  // accounts (not a purchase). The counterparty/bank name is irrelevant — we
+  // only use it to avoid flagging a real purchase as internal.
+  const TRANSFER_HINT_RE =
+    /(?:pix|transfer|ted|doc|envio|recebimento|deb\s*pix|entre contas|chave)/i;
+  const isTransferLike = (tx: T): boolean =>
+    !!tx.pluggyAccountId && TRANSFER_HINT_RE.test(tx.description);
+
+  const transferLike = transactions.filter(isTransferLike);
+
   const isInternalTransfer = (tx: T): boolean => {
-    if (!TRANSFER_RE.test(tx.description) || !tx.pluggyAccountId) return false;
+    if (!isTransferLike(tx)) return false;
     const wantedType = tx.type === "EXPENSE" ? "INCOME" : "EXPENSE";
-    const matches = transferCandidates.filter((other) => {
+    const matches = transferLike.filter((other) => {
       if (other.id === tx.id) return false;
       if (other.type !== wantedType) return false;
       if (other.pluggyAccountId === tx.pluggyAccountId) return false; // same account
@@ -61,14 +68,14 @@ export function filterInternalTransfers<T extends { id: string; type: string; am
       return true;
     });
     if (matches.length === 0) return false;
-    // Both legs describe the same transfer (same counterparty/bank after
-    // removing direction words) — certainly internal.
-    if (matches.some((o) => descriptionsMatchTransferPair(tx.description, o.description))) return true;
-    // No shared fingerprint (e.g. "PIX RECEBIDO DADOS CONTA" has no name),
-    // but there is a single exact-value counterpart within 3 days between
-    // two DIFFERENT own accounts: overwhelmingly an internal transfer
-    // (own money moved between accounts), otherwise it would inflate totals.
-    // With more than one candidate the fingerprint stays mandatory (safe).
+    // Strong signal: the two legs share a fingerprint (same counterparty/bank
+    // after stripping direction words).
+    if (matches.some((o) => descriptionsMatchTransferPair(tx.description, o.description)))
+      return true;
+    // Otherwise: a single exact-value counterpart within 3 days between two
+    // DIFFERENT own accounts, both transfer-like — almost certainly own money
+    // moved between accounts (e.g. "DEB PIX CHAVE" out vs "Transferência
+    // Recebida|JESIEL" in). Without this, internal transfers inflate totals.
     return matches.length === 1;
   };
   return transactions.filter((tx) => !isInternalTransfer(tx));
@@ -129,6 +136,7 @@ async function cardTransactionWhere(userId: string, start: Date, end: Date) {
   return {
     userId,
     type: "EXPENSE" as const,
+    isHidden: false,
     AND: [
       ...notTransfer,
       // Filtro pela FATURA (mês correto): billForecastMonth = mês filtrado,
@@ -176,6 +184,7 @@ router.get("/summary", async (req: Request, res: Response) => {
         where: {
           userId: user.id,
           date: { gte: start, lt: end },
+          isHidden: false,
           // Transactions linked to a credit card fatura are excluded: the
           // corresponding Bill row already counts that expense once.
           billId: null,
@@ -206,6 +215,12 @@ router.get("/summary", async (req: Request, res: Response) => {
       const amount = tx.amount;
       const person = tx.person;
 
+      // REGRA: transações importadas do Pluggy que NÃO são fatura de cartão
+      // (PIX, TED, débito em conta) não entram nos totais — só passam a
+      // contar quando lançadas manualmente. Vale para QUALQUER pessoa
+      // (HUSBAND/WIFE/COUPLE), não só para lançamentos sem pessoa atribuída.
+      if (tx.source === "PLUGGY" && !tx.isCreditCard) continue;
+
       if (person === "COUPLE") {
         const half = amount / 2;
         if (isExpense) {
@@ -234,6 +249,8 @@ router.get("/summary", async (req: Request, res: Response) => {
           wifeIncome += amount;
         }
       } else {
+        // Lançamentos manuais/bot sem pessoa atribuída contam normalmente
+        // (os importados não-cartão já foram excluídos acima).
         if (isExpense) {
           totalExpense += amount;
         } else {
@@ -259,9 +276,25 @@ router.get("/summary", async (req: Request, res: Response) => {
     const billsTotal = bills.reduce((sum, b) => sum + b.amount, 0);
     const balance = totalIncome - totalExpense;
 
+    // Despesas que NÃO são do cartão de crédito (PIX, débito, TED, contas em
+    // conta-corrente) — exclui transferências internas. O card "Cartão" já
+    // traz o total de fatura; este "Outros" separa o resto para o usuário.
+    const cardTxIds = new Set(
+      transactions.filter((t) => t.isCreditCard).map((t) => t.id)
+    );
+    const creditCardExpense = transactions
+      .filter((t) => t.isCreditCard && t.type === "EXPENSE")
+      .reduce((sum, t) => sum + t.amount, 0);
+    const expenseOther =
+      totalExpense - creditCardExpense - billsTotal < 0
+        ? 0
+        : totalExpense - creditCardExpense - billsTotal;
+
     res.json({
       totalIncome,
       totalExpense,
+      expenseOther,
+      creditCardExpense,
       balance,
       billsTotal,
       byPerson: {
@@ -287,6 +320,7 @@ router.get("/by-category", async (req: Request, res: Response) => {
           userId: user.id,
           type: "EXPENSE",
           date: { gte: start, lt: end },
+          isHidden: false,
           billId: null,
         },
         include: { category: true },
@@ -338,6 +372,7 @@ router.get("/percentage", async (req: Request, res: Response) => {
           userId: user.id,
           type: "EXPENSE",
           date: { gte: start, lt: end },
+          isHidden: false,
           billId: null,
         },
       })
@@ -374,7 +409,22 @@ router.get("/percentage", async (req: Request, res: Response) => {
       }
     }
 
-    let husbandSalary = 0;
+    // Salário configurado nas Rendas Fixas (FixedIncome) entra na previsão.
+    // O campo user.salary (legado) é somado às rendas fixas ativas.
+    const fixedIncomes = await prisma.fixedIncome.findMany({
+      where: { userId: user.id, active: true },
+      select: { amount: true, person: true },
+    });
+    const fixedByPerson = { HUSBAND: 0, WIFE: 0, COUPLE: 0 };
+    for (const fi of fixedIncomes) {
+      const p = fi.person === "HUSBAND" || fi.person === "WIFE" || fi.person === "COUPLE" ? fi.person : "COUPLE";
+      fixedByPerson[p] += fi.amount;
+    }
+
+    // Renda do casal (COUPLE) entra MEIO a meio no salário de cada cônjuge —
+    // mesma regra da soma da parceira abaixo (fixedByPerson.COUPLE/2). Sem
+    // isso, o denominador do percentual do marido ficava maior que o da esposa.
+    let husbandSalary = (user.salary ?? 0) + fixedByPerson.HUSBAND + fixedByPerson.COUPLE / 2;
     let wifeSalary = 0;
 
     if (user.partnerId) {
@@ -382,11 +432,20 @@ router.get("/percentage", async (req: Request, res: Response) => {
         where: { id: user.partnerId },
       });
       if (partner) {
-        wifeSalary = partner.salary ?? 0;
-        husbandSalary = user.salary ?? 0;
+        const partnerFixed = await prisma.fixedIncome.findMany({
+          where: { userId: partner.id, active: true },
+          select: { amount: true, person: true },
+        });
+        let partnerFixedSum = 0;
+        for (const fi of partnerFixed) {
+          const p = fi.person === "WIFE" || fi.person === "HUSBAND" || fi.person === "COUPLE" ? fi.person : "COUPLE";
+          if (p === "WIFE") partnerFixedSum += fi.amount;
+          else if (p === "COUPLE") partnerFixedSum += fi.amount / 2;
+        }
+        wifeSalary = (partner.salary ?? 0) + partnerFixedSum;
       }
     } else {
-      husbandSalary = user.salary ?? 0;
+      wifeSalary = fixedByPerson.WIFE;
     }
 
     const husbandPercentage = husbandSalary > 0 ? (husbandExpense / husbandSalary) * 100 : 0;
@@ -411,7 +470,7 @@ router.get("/by-payment", async (req: Request, res: Response) => {
     // Bill row (paymentMethod "Fatura Cartão"), same rule as /summary.
     const [transactions, bills] = await Promise.all([
       prisma.transaction.findMany({
-        where: { userId: user.id, type: "EXPENSE", date: { gte: start, lt: end }, billId: null },
+        where: { userId: user.id, type: "EXPENSE", date: { gte: start, lt: end }, billId: null, isHidden: false },
       }),
       prisma.bill.findMany({
         where: { userId: user.id, dueDate: { gte: start, lt: end } },
@@ -472,8 +531,8 @@ router.get("/comparison", async (req: Request, res: Response) => {
 
     // Bill-aware comparison (same rule as /summary): faturas count once.
     const [currTx, prevTx, currBills, prevBills] = await Promise.all([
-      prisma.transaction.findMany({ where: { userId: user.id, date: { gte: start, lt: end }, billId: null } }),
-      prisma.transaction.findMany({ where: { userId: user.id, date: { gte: prevStart, lt: prevEnd }, billId: null } }),
+      prisma.transaction.findMany({ where: { userId: user.id, date: { gte: start, lt: end }, billId: null, isHidden: false } }),
+      prisma.transaction.findMany({ where: { userId: user.id, date: { gte: prevStart, lt: prevEnd }, billId: null, isHidden: false } }),
       prisma.bill.findMany({ where: { userId: user.id, dueDate: { gte: start, lt: end } } }),
       prisma.bill.findMany({ where: { userId: user.id, dueDate: { gte: prevStart, lt: prevEnd } } }),
     ]);
@@ -513,7 +572,7 @@ router.get("/year-analysis", async (req: Request, res: Response) => {
     // /summary; internal transfers are excluded from the aggregates.
     const [transactions, bills] = await Promise.all([
       prisma.transaction.findMany({
-        where: { userId: user.id, type: "EXPENSE", date: { gte: start, lt: end }, billId: null },
+        where: { userId: user.id, type: "EXPENSE", date: { gte: start, lt: end }, billId: null, isHidden: false },
         include: { category: true },
       }),
       prisma.bill.findMany({
@@ -566,7 +625,7 @@ router.get("/tip", async (req: Request, res: Response) => {
     // Bill-aware tip: same aggregation rule as /summary (faturas contam 1x).
     const [transactions, bills] = await Promise.all([
       prisma.transaction.findMany({
-        where: { userId: user.id, type: "EXPENSE", date: { gte: start, lt: end }, billId: null },
+        where: { userId: user.id, type: "EXPENSE", date: { gte: start, lt: end }, billId: null, isHidden: false },
         include: { category: true },
       }),
       prisma.bill.findMany({
@@ -669,6 +728,7 @@ router.get("/income-detail", async (req: Request, res: Response) => {
         userId: user.id,
         type: "INCOME",
         date: { gte: start, lt: end },
+        isHidden: false,
       },
       orderBy: { date: "desc" },
     });

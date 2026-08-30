@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { LayoutDashboard, ArrowLeftRight, Calendar, Settings, LogOut, Wallet, Wallet2, Target, TrendingUp, BarChart3, Menu, X, ArrowDownLeft } from 'lucide-react';
+import { LayoutDashboard, ArrowLeftRight, Calendar, Settings, LogOut, Wallet, Wallet2, Target, TrendingUp, BarChart3, Menu, X, ArrowDownLeft, HelpCircle } from 'lucide-react';
 import ChatBot from './ChatBot';
 
 const navItems = [
@@ -13,6 +13,7 @@ const navItems = [
   { to: '/investments', icon: TrendingUp, label: 'Investimentos' },
   { to: '/salary', icon: Wallet, label: 'Salário' },
   { to: '/annual', icon: BarChart3, label: 'Panorama Anual' },
+  { to: '/help', icon: HelpCircle, label: 'Ajuda' },
   { to: '/setup', icon: Settings, label: 'Configuração' },
 ];
 

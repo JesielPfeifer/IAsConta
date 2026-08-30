@@ -5,6 +5,7 @@ import { ArrowUpRight, ArrowDownRight, Wallet, PieChart, BarChart3, Clock, Check
 import { PieChart as RePie, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import dayjs from 'dayjs';
 import { api } from '../api/client';
+import { useOnboarding } from '../hooks/useOnboarding';
 
 const COLORS = ['#10b981', '#14b8a6', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#f97316', '#ef4444', '#84cc16', '#a855f7', '#14b8a6', '#e11d48'];
 
@@ -23,6 +24,55 @@ interface Bill {
 }
 
 export default function Dashboard() {
+  const [pixReceived, setPixReceived] = useState<any[]>([]);
+  const [pixLoading, setPixLoading] = useState(false);
+  const [pixAddedIds, setPixAddedIds] = useState<string[]>([]);
+  const [pixAddingId, setPixAddingId] = useState<string | null>(null);
+
+  // PIX/DOC recebidos via Pluggy que ainda não viraram entrada manual — o
+  // usuário decide se quer adicionar como receita (regra: só fatura de cartão
+  // conta automaticamente; PIX fica a critério).
+  async function loadPixReceived() {
+    try {
+      setPixLoading(true);
+      const rows = await api('/api/transactions/pix-received');
+      setPixReceived(Array.isArray(rows) ? rows : []);
+    } catch {
+      setPixReceived([]);
+    } finally {
+      setPixLoading(false);
+    }
+  }
+
+  useEffect(() => { loadPixReceived(); /* eslint-disable-next-line */ }, []);
+
+  async function addPixAsIncome(id: string) {
+    // Guarda de duplo clique: o backend já é atômico/idempotente, mas o botão
+    // desabilitado evita o alerta de "já adicionado" em cliques rápidos.
+    if (pixAddingId) return;
+    setPixAddingId(id);
+    try {
+      await api(`/api/transactions/pix-received/${id}/add`, { method: 'POST' });
+      setPixAddedIds((p) => [...p, id]);
+      setPixReceived((p) => p.filter((t) => t.id !== id));
+    } catch (err: any) {
+      // Já convertido (duplo clique/aba repetida): remove da lista sem alarme.
+      if (String(err.message || '').toLowerCase().includes('já adicionado')) {
+        setPixReceived((p) => p.filter((t) => t.id !== id));
+      } else {
+        alert(err.message || 'Erro ao adicionar');
+      }
+    } finally {
+      setPixAddingId(null);
+    }
+  }
+
+  // ── Onboarding interativo (primeira visita) ──
+  const onboarding = useOnboarding('dashboard', [
+    { target: '.iasconta-summary-cards', title: 'Resumo do mês', description: 'Cards com receitas, despesas e saldo do mês selecionado. Use o seletor de mês no topo para navegar entre períodos.' },
+    { target: '.iasconta-month-compare', title: 'Comparação mensal', description: 'Veja a variação das suas despesas e receitas em relação ao mês anterior para acompanhar a evolução.' },
+    { target: '.iasconta-ai-tip', title: 'Dica da IA', description: 'Análises e sugestões automáticas baseadas nos seus dados financeiros aparecem aqui.' },
+  ]);
   const [month, setMonth] = useState(dayjs().format('YYYY-MM'));
   const { summary, byCategory, byPayment, creditCardTotal, comparison, yearAnalysis, tip, loading } = useDashboard(month);
   const { transactions } = useTransactions({ month });
@@ -87,6 +137,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {onboarding}
       {/* Header */}
       <div className="relative overflow-hidden rounded-2xl border border-white/5 bg-gradient-to-b from-emerald-500/[0.06] via-gray-900 to-transparent p-6">
         <div className="absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent" />
@@ -109,7 +160,7 @@ export default function Dashboard() {
       </div>
 
       {/* Cards resumo */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 iasconta-summary-cards">
         <SummaryCard
           label="Saldo do mês"
           value={formatCurrency(balance)}
@@ -142,7 +193,7 @@ export default function Dashboard() {
 
       {/* Comparacao mês anterior */}
       {comparison && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 iasconta-month-compare">
           <MiniCard
             label="vs mês anterior"
             value={`${comparison.diffPercent > 0 ? '+' : ''}${comparison.diffPercent}%`}
@@ -329,6 +380,30 @@ export default function Dashboard() {
           icon={<DollarSign className="h-5 w-5 text-emerald-400" />}
           iconBg="bg-emerald-500/10"
         >
+          {pixReceived.length > 0 && (
+            <div className="mb-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+              <p className="text-sm text-emerald-300 font-medium mb-2">
+                Você recebeu {pixReceived.length} {pixReceived.length === 1 ? 'PIX/DOC' : 'PIX/DOC'} via Open Finance neste mês. Deseja adicionar como entrada?
+              </p>
+              <ul className="space-y-1.5">
+                {pixReceived.map((t) => (
+                  <li key={t.id} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="text-gray-300 truncate">{dayjs(t.date).format('DD/MM')} · {t.description}</span>
+                    <span className="flex items-center gap-2">
+                      <span className="text-emerald-400 font-semibold">+{formatCurrency(Math.abs(t.amount))}</span>
+                      <button
+                        onClick={() => addPixAsIncome(t.id)}
+                        disabled={pixAddingId === t.id}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {pixAddingId === t.id ? 'Adicionando...' : 'Adicionar'}
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {incomeTx.length > 0 ? (
             <table className="w-full text-sm">
               <thead>
@@ -418,6 +493,7 @@ export default function Dashboard() {
         )}
 
         {tip && (
+          <div className="iasconta-ai-tip">
           <SectionCard
             title="Dica de Economia"
             subtitle="IA analisou seus gastos"
@@ -443,6 +519,7 @@ export default function Dashboard() {
               )}
             </div>
           </SectionCard>
+          </div>
         )}
       </div>
     </div>
