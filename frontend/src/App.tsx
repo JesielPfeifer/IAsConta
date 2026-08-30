@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
 import Layout from './components/Layout';
 import Login from './pages/Login';
+import SetupWizard from './components/SetupWizard';
 import Dashboard from './pages/Dashboard';
 import Transactions from './pages/Transactions';
 import Bills from './pages/Bills';
@@ -23,7 +24,13 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     );
   }
   if (!user) return <Navigate to="/login" replace />;
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      {/* Wizard de setup inicial: aparece após o login para usuários sem configuração básica */}
+      <SetupWizard />
+    </>
+  );
 }
 
 export default function App() {

@@ -1,0 +1,179 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tipo:
+        description: "Tipo de release (auto calcula o bump pelos commits; ou force patch/minor/major)"
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Criar tag e release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout com histórico completo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calcular próxima versão e gerar changelog
+        id: calculo
+        run: |
+          set -euo pipefail
+
+          REPO="${{ github.repository }}"
+          INPUT_TIPO="${{ inputs.tipo }}"
+
+          # Última tag semver (ou v0.0.0 como base quando ainda não há tags)
+          ULTIMA_TAG="$(git tag --sort=-v:refname | head -1 || true)"
+          ULTIMA_TAG="${ULTIMA_TAG:-v0.0.0}"
+
+          if git rev-parse -q --verify "refs/tags/${ULTIMA_TAG}" >/dev/null 2>&1; then
+            RANGE="${ULTIMA_TAG}..HEAD"
+            TEM_TAG_ANTERIOR=1
+          else
+            RANGE="HEAD"
+            TEM_TAG_ANTERIOR=0
+          fi
+
+          # Varre os commits entre as tags: classifica bump (semver) e agrupa o changelog
+          HASTA=0
+          MAJOR=0
+          FEAT=0
+          PATCH=0
+          FEATURES=""
+          FIXES=""
+          MANUT=""
+          while IFS=$'\t' read -r SHA SUBJ; do
+            case "${SUBJ}" in
+              [Mm]erge*) continue ;;
+            esac
+            HASTA=1
+            SUBJ_LINK="$(printf '%s' "${SUBJ}" | sed -E "s|\(#([0-9]+)\)|([#\1](https://github.com/${REPO}/pull/\1))|g")"
+            LINHA="- ${SUBJ_LINK} ([${SHA}](https://github.com/${REPO}/commit/${SHA}))"
+            case "${SUBJ}" in
+              feat!:* | feature!:*)
+                MAJOR=1
+                FEAT=1
+                GRUPO="features"
+                ;;
+              *!:* | BREAKING*)
+                MAJOR=1
+                GRUPO="features"
+                ;;
+              feat:* | feature:*)
+                FEAT=1
+                GRUPO="features"
+                ;;
+              fix:*)
+                PATCH=1
+                GRUPO="fixes"
+                ;;
+              *)
+                PATCH=1
+                GRUPO="manut"
+                ;;
+            esac
+            case "${GRUPO}" in
+              features) FEATURES="${FEATURES}${LINHA}"$'\n' ;;
+              fixes)    FIXES="${FIXES}${LINHA}"$'\n' ;;
+              manut)    MANUT="${MANUT}${LINHA}"$'\n' ;;
+            esac
+          done < <(git log --format='%h%x09%s' "${RANGE}" 2>/dev/null || true)
+
+          if [ "${HASTA}" = "0" ]; then
+            echo "::error::Nenhum commit desde a última tag (${ULTIMA_TAG}). Nada para lançar."
+            exit 1
+          fi
+
+          # Calcula o bump (auto) ou usa o tipo forçado
+          if [ "${INPUT_TIPO}" = "auto" ]; then
+            if [ "${MAJOR}" = "1" ] || printf '%s' "$(git log --format='%B' "${RANGE}")" | grep -qi 'breaking change'; then
+              TIPO_BUMP="major"
+            elif [ "${FEAT}" = "1" ]; then
+              TIPO_BUMP="minor"
+            else
+              TIPO_BUMP="patch"
+            fi
+            if [ "${MAJOR}" = "0" ] && [ "${FEAT}" = "0" ] && [ "${PATCH}" = "0" ]; then
+              echo "::error::Nenhuma mudança no padrão Conventional Commits desde ${ULTIMA_TAG}. Nada para lançar."
+              exit 1
+            fi
+          else
+            TIPO_BUMP="${INPUT_TIPO}"
+          fi
+
+          bump_semver() {
+            local v="${1#v}" tipo="${2}" M m p
+            IFS='.' read -r M m p <<< "${v}"
+            case "${tipo}" in
+              major) M=$((M + 1)); m=0; p=0 ;;
+              minor) m=$((m + 1)); p=0 ;;
+              patch) p=$((p + 1)) ;;
+            esac
+            echo "v${M}.${m}.${p}"
+          }
+
+          VERSAO="$(bump_semver "${ULTIMA_TAG}" "${TIPO_BUMP}")"
+
+          if [ "${TEM_TAG_ANTERIOR}" = "1" ]; then
+            CABECALHO="## [${VERSAO}](https://github.com/${REPO}/compare/${ULTIMA_TAG}...${VERSAO}) ($(date +%Y-%m-%d))"
+          else
+            CABECALHO="## ${VERSAO} ($(date +%Y-%m-%d))"
+          fi
+
+          NOTAS="${RUNNER_TEMP}/notas-release-${VERSAO}.md"
+          {
+            echo "${CABECALHO}"
+            echo ""
+            if [ -n "${FEATURES}" ]; then
+              echo "### 🚀 Features"
+              echo ""
+              printf '%s' "${FEATURES}"
+              echo ""
+            fi
+            if [ -n "${FIXES}" ]; then
+              echo "### 🐛 Fixes"
+              echo ""
+              printf '%s' "${FIXES}"
+              echo ""
+            fi
+            if [ -n "${MANUT}" ]; then
+              echo "### ⚙️ Manutenção"
+              echo ""
+              printf '%s' "${MANUT}"
+              echo ""
+            fi
+          } > "${NOTAS}"
+
+          echo "ultima_tag=${ULTIMA_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "versao=${VERSAO}" >> "${GITHUB_OUTPUT}"
+          echo "notas=${NOTAS}" >> "${GITHUB_OUTPUT}"
+
+      - name: Criar tag e enviar
+        run: |
+          set -euo pipefail
+          VERSAO="${{ steps.calculo.outputs.versao }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${VERSAO}" -m "Release ${VERSAO}"
+          git push origin "${VERSAO}"
+
+      - name: Criar release no GitHub
+        env:
+          GH_TOKEN: "${{ github.token }}"
+        run: |
+          set -euo pipefail
+          VERSAO="${{ steps.calculo.outputs.versao }}"
+          gh release create "${VERSAO}" --title "${VERSAO}" --notes-file "${{ steps.calculo.outputs.notas }}"
