@@ -83,7 +83,7 @@ interface ForecastCard {
 export default function Bills() {
 
   // ── Onboarding interativo (primeira visita) ──
-  useOnboarding('bills', [
+  const onboarding = useOnboarding('bills', [
     { target: '.iasconta-total-pendente', title: 'Total Pendente', description: 'Soma das contas em aberto do mês — incluindo as faturas previstas dos cartões enquanto a fatura oficial não é publicada pelo banco.' },
     { target: '.iasconta-forecast-cards', title: 'Faturas previstas', description: 'Projeção das faturas de cartão do mês. Use “Registrar como conta a pagar” para transformá-la numa conta real com valor editável.' },
     { target: '.iasconta-paid-toggle', title: 'Marcar como pago', description: 'Clique no check ao lado da conta para marcar como paga (ou reabrir). Ela sai do Total Pendente e entra no Total Pago.' },
@@ -275,6 +275,7 @@ const filteredBills = bills.filter((b) => {
 
   return (
     <div className="space-y-6">
+      {onboarding}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight">Contas a Pagar</h1>

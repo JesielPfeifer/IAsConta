@@ -58,7 +58,7 @@ function CustomSelect({ value, onChange, options, icon: Icon }: {
 
 export default function Transactions() {
   // ── Onboarding interativo (primeira visita) ──
-  useOnboarding('transactions', [
+  const onboarding = useOnboarding('transactions', [
     { target: '.iasconta-group-cards', title: 'Gastos agrupados', description: 'As despesas aparecem agrupadas por cartão (fatura do ciclo) e por forma de pagamento no débito. Clique num grupo para filtrar a lista só com ele.' },
     { target: '.iasconta-receitas-group', title: 'Grupo Receitas', description: 'Suas entradas ficam reunidas no grupo Receitas, com total e lançamentos do período.' },
     { target: '.iasconta-bulk-actions', title: 'Seleção múltipla', description: 'Marque as caixas de seleção das transações e use o botão Excluir que aparece aqui para remover várias de uma vez.' },
@@ -148,8 +148,18 @@ export default function Transactions() {
         cartões[k] = cartões[k] || { total: 0, count: 0 };
         cartões[k].total += Math.abs(t.amount);
         cartões[k].count += 1;
+      } else if (!t.paymentMethod) {
+        // Sem forma de pagamento: só entra em DINHEIRO quando é transferência
+        // do casal; as demais aparecem APENAS em "Outros" (sem duplicar).
+        const ehCasalTx =
+          /transfer|pix|ted/.test((t.description || '').toLowerCase()) &&
+          (/(eduarda|jesiel)/.test((t.description || '').toLowerCase()) || t.person === 'WIFE');
+        if (!ehCasalTx) continue;
+        formas['DINHEIRO'] = formas['DINHEIRO'] || { total: 0, count: 0 };
+        formas['DINHEIRO'].total += Math.abs(t.amount);
+        formas['DINHEIRO'].count += 1;
       } else {
-        const k = t.paymentMethod ? t.paymentMethod.toUpperCase() : 'DINHEIRO';
+        const k = t.paymentMethod.toUpperCase();
         formas[k] = formas[k] || { total: 0, count: 0 };
         formas[k].total += Math.abs(t.amount);
         formas[k].count += 1;
@@ -321,6 +331,7 @@ export default function Transactions() {
 
   return (
     <div className="space-y-6">
+      {onboarding}
       {salaryReview.length > 0 && (
         <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
           <p className="text-sm text-amber-200 font-medium">

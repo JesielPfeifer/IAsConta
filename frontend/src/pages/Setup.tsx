@@ -36,7 +36,7 @@ const EMPTY: UserSettings = {
 export default function Setup() {
 
   // ── Onboarding interativo (primeira visita) ──
-  useOnboarding('setup', [
+  const onboarding = useOnboarding('setup', [
     { target: '#pluggy-client-id', title: 'Conexão Pluggy (Open Finance)', description: 'Informe suas credenciais Pluggy (ou use as globais do servidor) e clique em “Conectar Novo Banco” para importar transações e faturas automaticamente.' },
     { target: '.iasconta-wa-card', title: 'WhatsApp', description: 'Vincule seu WhatsApp escaneando o QR Code e aponte o grupo onde o bot vai registrar gastos e responder perguntas.' },
     { target: '.iasconta-setup-save', title: 'Configurações do casal', description: 'Nomes do marido e da esposa, chaves de IA e canais extras ficam aqui. Role até o fim e clique em Salvar Configurações.' },
@@ -198,6 +198,7 @@ export default function Setup() {
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-8">
+      {onboarding}
       <div className="flex items-center gap-3 mb-6">
         <Smartphone className="w-8 h-8 text-emerald-400" />
         <h1 className="text-2xl font-bold text-white">Configuracao</h1>

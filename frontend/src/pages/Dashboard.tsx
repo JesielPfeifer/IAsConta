@@ -27,6 +27,7 @@ export default function Dashboard() {
   const [pixReceived, setPixReceived] = useState<any[]>([]);
   const [pixLoading, setPixLoading] = useState(false);
   const [pixAddedIds, setPixAddedIds] = useState<string[]>([]);
+  const [pixAddingId, setPixAddingId] = useState<string | null>(null);
 
   // PIX/DOC recebidos via Pluggy que ainda não viraram entrada manual — o
   // usuário decide se quer adicionar como receita (regra: só fatura de cartão
@@ -46,17 +47,28 @@ export default function Dashboard() {
   useEffect(() => { loadPixReceived(); /* eslint-disable-next-line */ }, []);
 
   async function addPixAsIncome(id: string) {
+    // Guarda de duplo clique: o backend já é atômico/idempotente, mas o botão
+    // desabilitado evita o alerta de "já adicionado" em cliques rápidos.
+    if (pixAddingId) return;
+    setPixAddingId(id);
     try {
       await api(`/api/transactions/pix-received/${id}/add`, { method: 'POST' });
       setPixAddedIds((p) => [...p, id]);
       setPixReceived((p) => p.filter((t) => t.id !== id));
     } catch (err: any) {
-      alert(err.message || 'Erro ao adicionar');
+      // Já convertido (duplo clique/aba repetida): remove da lista sem alarme.
+      if (String(err.message || '').toLowerCase().includes('já adicionado')) {
+        setPixReceived((p) => p.filter((t) => t.id !== id));
+      } else {
+        alert(err.message || 'Erro ao adicionar');
+      }
+    } finally {
+      setPixAddingId(null);
     }
   }
 
   // ── Onboarding interativo (primeira visita) ──
-  useOnboarding('dashboard', [
+  const onboarding = useOnboarding('dashboard', [
     { target: '.iasconta-summary-cards', title: 'Resumo do mês', description: 'Cards com receitas, despesas e saldo do mês selecionado. Use o seletor de mês no topo para navegar entre períodos.' },
     { target: '.iasconta-month-compare', title: 'Comparação mensal', description: 'Veja a variação das suas despesas e receitas em relação ao mês anterior para acompanhar a evolução.' },
     { target: '.iasconta-ai-tip', title: 'Dica da IA', description: 'Análises e sugestões automáticas baseadas nos seus dados financeiros aparecem aqui.' },
@@ -125,6 +137,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {onboarding}
       {/* Header */}
       <div className="relative overflow-hidden rounded-2xl border border-white/5 bg-gradient-to-b from-emerald-500/[0.06] via-gray-900 to-transparent p-6">
         <div className="absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent" />
@@ -380,9 +393,10 @@ export default function Dashboard() {
                       <span className="text-emerald-400 font-semibold">+{formatCurrency(Math.abs(t.amount))}</span>
                       <button
                         onClick={() => addPixAsIncome(t.id)}
-                        className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 text-xs font-medium transition-colors"
+                        disabled={pixAddingId === t.id}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        Adicionar
+                        {pixAddingId === t.id ? 'Adicionando...' : 'Adicionar'}
                       </button>
                     </span>
                   </li>

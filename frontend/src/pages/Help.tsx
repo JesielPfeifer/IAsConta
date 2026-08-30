@@ -356,10 +356,9 @@ export default function Help() {
             open={openFaq === 3}
             onToggle={() => toggleFaq(3)}
           >
-            O sync identifica cada lançamento pelo ID do Open Finance: se ele ainda existe no banco, uma nova
-            sincronização pode importá-lo de novo. Para lançamentos recorrentes que só precisam de ajuste, prefira{' '}
-            <strong className="text-white">editar</strong> em vez de excluir (a edição é preservada). Se o banco remover o
-            lançamento, o evento de exclusão dispara o sync e o app reavalia automaticamente.
+            Ao excluir uma transação importada, o app mantém o lançamento oculto nas próximas sincronizações. Para
+            exibi-lo novamente, restaure o lançamento. Para lançamentos recorrentes que precisam de ajuste, prefira{' '}
+            <strong className="text-white">editar</strong>; a edição é preservada nas próximas sincronizações.
           </FaqItem>
           <FaqItem
             q="Como desvinculo meu banco?"

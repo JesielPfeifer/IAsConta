@@ -55,6 +55,11 @@ function parseNumber(input: string): number {
     s = s.replace(/\./g, '').replace(',', '.');
   } else if (s.includes(',')) {
     s = s.replace(',', '.');
+  } else if (/^\d{1,3}(?:\.\d{3})+$/.test(s)) {
+    // pt-BR: milhar sem centavos ("1.000" / "1.000.000") — remove os pontos
+    // antes do parseFloat, senão "1.000" viraria 1. Mesma regra do
+    // FixedIncomesCard (parse decimal preservado nos demais formatos).
+    s = s.replace(/\./g, '');
   }
   const parsed = parseFloat(s);
   return isNaN(parsed) ? 0 : parsed;
@@ -113,7 +118,7 @@ function SectionHeader({ title, sectionKey, open, onToggle, icon }: { title: str
 
 export default function Salary() {
   // ── Onboarding interativo (primeira visita) ──
-  useOnboarding('salary', [
+  const onboarding = useOnboarding('salary', [
     { target: '.iasconta-salary-form', title: 'Cálculo automático', description: 'Preencha salário base, adicionais e descontos: INSS e IRRF são calculados automaticamente pelas tabelas vigentes, e o líquido atualiza em tempo real.' },
     { target: '.iasconta-tax-overrides', title: 'Alíquotas editáveis', description: 'Deixe INSS/IRRF vazios para usar o cálculo automático ou digite um valor para sobrescrever (0 marca como isento).' },
     { target: '.iasconta-fixed-incomes', title: 'Rendas fixas mensais', description: 'Cadastre aqui os salários/recorrentes de cada pessoa do casal — eles alimentam o acompanhamento mensal.' },
@@ -314,6 +319,7 @@ export default function Salary() {
 
   return (
     <div className="space-y-6">
+      {onboarding}
       <div className="flex items-center gap-3">
         <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
           <Wallet className="w-5 h-5 text-emerald-400" />
