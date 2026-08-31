@@ -98,6 +98,7 @@ export default function Bills() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<string | string[] | null>(null);
   const [editingAmount, setEditingAmount] = useState<{ id: string; value: string } | null>(null);
+  const [editingBill, setEditingBill] = useState<{ id: string; name: string; amount: string; dueDate: string; person: string } | null>(null);
 
   const months = [
     { value: 1, label: 'Janeiro' }, { value: 2, label: 'Fevereiro' }, { value: 3, label: 'Marco' },
@@ -239,6 +240,32 @@ export default function Bills() {
     });
     setEditingAmount(null);
     loadBills();
+  }
+
+  async function handleBillSave(billId: string) {
+    if (!editingBill) return;
+    const newAmount = parseFloat(editingBill.amount);
+    if (isNaN(newAmount) || newAmount <= 0) { setEditingBill(null); return; }
+    const payload: Record<string, unknown> = {
+      name: editingBill.name.trim() || undefined,
+      amount: newAmount,
+      person: editingBill.person || null,
+    };
+    if (editingBill.dueDate) payload.dueDate = dayjs(editingBill.dueDate).toISOString();
+    await api(`/api/bills/${billId}`, { method: 'PUT', body: JSON.stringify(payload) });
+    setEditingBill(null);
+    loadBills();
+  }
+
+  function openBillEdit(b: { id: string; name: string; amount: number; dueDate: Date | string }) {
+    setEditingAmount(null);
+    setEditingBill({
+      id: b.id,
+      name: b.name,
+      amount: String(b.amount),
+      dueDate: dayjs(b.dueDate).format('YYYY-MM-DD'),
+      person: 'person' in b ? (b as unknown as { person?: string }).person ?? '' : '',
+    });
   }
 
   // Faturas previstas do mês (cartões) — enquanto a oficial não é publicada
@@ -431,6 +458,7 @@ const filteredBills = bills.filter((b) => {
                     const isOverdue = !b.isPaid && dayjs(b.dueDate).isBefore(dayjs(), 'day');
                     const isSelected = selected.has(b.id);
                     const isEditing = editingAmount?.id === b.id;
+                    const isEditingBill = editingBill?.id === b.id;
                     return (
                       <tr key={b.id} className={`border-b border-white/[0.03] transition-colors duration-150 hover:bg-white/[0.02] ${isSelected ? 'bg-emerald-500/[0.07]' : ''}`}>
                         <td className="px-4 py-3">
@@ -438,18 +466,40 @@ const filteredBills = bills.filter((b) => {
                             type="checkbox"
                             checked={isSelected}
                             onChange={() => toggleSelect(b.id)}
+                            disabled={isEditingBill}
                             className="w-4 h-4 accent-emerald-500 cursor-pointer"
                           />
                         </td>
                         <td className="px-4 py-3 text-white">
-                          <div className="flex items-center gap-2">
-                            <span className={b.isPaid ? 'line-through text-gray-500' : ''}>{b.name}</span>
-                            {b.category && <span className="text-xs px-2 py-0.5 rounded-full bg-white/5 text-gray-400">{b.category.name}</span>}
-                            {b.isRecurring && <span className="text-xs text-gray-500">recorrente</span>}
-                          </div>
+                          {isEditingBill ? (
+                            <input
+                              type="text"
+                              value={editingBill.name}
+                              onChange={(e) => setEditingBill({ ...editingBill, name: e.target.value })}
+                              onKeyDown={(e) => { if (e.key === 'Enter') handleBillSave(b.id); if (e.key === 'Escape') setEditingBill(null); }}
+                              autoFocus
+                              className="w-48 bg-gray-800 border border-white/10 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
+                            />
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <span className={b.isPaid ? 'line-through text-gray-500' : ''}>{b.name}</span>
+                              {b.category && <span className="text-xs px-2 py-0.5 rounded-full bg-white/5 text-gray-400">{b.category.name}</span>}
+                              {b.isRecurring && <span className="text-xs text-gray-500">recorrente</span>}
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-white font-medium">
-                          {isEditing ? (
+                          {isEditingBill ? (
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0.01"
+                              value={editingBill.amount}
+                              onChange={(e) => setEditingBill({ ...editingBill, amount: e.target.value })}
+                              onKeyDown={(e) => { if (e.key === 'Enter') handleBillSave(b.id); if (e.key === 'Escape') setEditingBill(null); }}
+                              className="w-28 bg-gray-800 border border-white/10 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
+                            />
+                          ) : isEditing ? (
                             <div className="flex items-center gap-1">
                               <input
                                 type="number"
@@ -476,9 +526,33 @@ const filteredBills = bills.filter((b) => {
                           )}
                         </td>
                         <td className={`px-4 py-3 ${isOverdue ? 'text-red-400' : 'text-gray-400'}`}>
-                          {dayjs(b.dueDate).format('DD/MM/YYYY')}
+                          {isEditingBill ? (
+                            <input
+                              type="date"
+                              value={editingBill.dueDate}
+                              onChange={(e) => setEditingBill({ ...editingBill, dueDate: e.target.value })}
+                              className="bg-gray-800 border border-white/10 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
+                            />
+                          ) : (
+                            dayjs(b.dueDate).format('DD/MM/YYYY')
+                          )}
                         </td>
-                        <td className="px-4 py-3 text-gray-400">{getPersonLabel(b.person)}</td>
+                        <td className="px-4 py-3 text-gray-400">
+                          {isEditingBill ? (
+                            <select
+                              value={editingBill.person}
+                              onChange={(e) => setEditingBill({ ...editingBill, person: e.target.value })}
+                              className="bg-gray-800 border border-white/10 rounded-lg px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
+                            >
+                              <option value="">—</option>
+                              <option value="HUSBAND">Marido</option>
+                              <option value="WIFE">Esposa</option>
+                              <option value="COUPLE">Casal</option>
+                            </select>
+                          ) : (
+                            getPersonLabel(b.person)
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-gray-400">
                           {b.totalInstallments > 1 ? `${b.currentInstallment}/${b.totalInstallments}` : '-'}
                         </td>
@@ -493,14 +567,30 @@ const filteredBills = bills.filter((b) => {
                         </td>
                         <td className="px-4 py-3 text-right">
                           <div className="flex items-center justify-end gap-1">
-                            {!b.isPaid && (
-                              <button onClick={() => togglePaid(b)} className="p-1.5 hover:bg-emerald-500/10 rounded-lg text-gray-400 hover:text-emerald-400 transition-colors iasconta-paid-toggle" title="Marcar como pago">
-                                <Check className="w-4 h-4" />
-                              </button>
+                            {isEditingBill ? (
+                              <>
+                                <button onClick={() => handleBillSave(b.id)} className="p-1.5 hover:bg-emerald-500/10 rounded-lg text-emerald-400 transition-colors" title="Salvar edição">
+                                  <Check className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => setEditingBill(null)} className="p-1.5 hover:bg-red-500/10 rounded-lg text-gray-400 hover:text-red-400 transition-colors" title="Cancelar">
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                {!b.isPaid && (
+                                  <button onClick={() => togglePaid(b)} className="p-1.5 hover:bg-emerald-500/10 rounded-lg text-gray-400 hover:text-emerald-400 transition-colors iasconta-paid-toggle" title="Marcar como pago">
+                                    <Check className="w-4 h-4" />
+                                  </button>
+                                )}
+                                <button onClick={() => openBillEdit(b)} className="p-1.5 hover:bg-emerald-500/10 rounded-lg text-gray-400 hover:text-emerald-400 transition-colors" title="Editar conta" aria-label="Editar conta">
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => handleDeleteRequest(b.id)} className="p-1.5 hover:bg-red-500/10 rounded-lg text-gray-400 hover:text-red-400 transition-colors">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
                             )}
-                            <button onClick={() => handleDeleteRequest(b.id)} className="p-1.5 hover:bg-red-500/10 rounded-lg text-gray-400 hover:text-red-400 transition-colors">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
                           </div>
                         </td>
                       </tr>
