@@ -451,7 +451,7 @@ router.get("/financial-health", async (req: Request, res: Response) => {
       })
       // Open = highest parcel charged is still below the total
       // (grupos sem parcela no mês corrente vieram como null no map)
-      .filter((p) => p !== null && p.remaining > 0)
+      .filter((p): p is NonNullable<typeof p> => p !== null && p.remaining > 0)
       .sort((a, b) => a.endsAt.getTime() - b.endsAt.getTime());
 
     // Ending within the next 3 months (last parcel date inside the window)
