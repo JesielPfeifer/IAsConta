@@ -410,6 +410,10 @@ router.get("/financial-health", async (req: Request, res: Response) => {
       .map((txs) => {
         // Current position: highest parcel with date within the current month
         const currentMonthTxs = txs.filter((t) => t.date < end);
+        // Grupo sem nenhuma parcela no mês corrente (ex.: compra pré-criada
+        // que só começa nos próximos meses) não tem posição atual — pular,
+        // senão reduce() de array vazio derruba o health (TypeError).
+        if (currentMonthTxs.length === 0) return null;
         const latest = currentMonthTxs.reduce((a, b) =>
           b.currentInstallment > a.currentInstallment ? b : a
         );
@@ -446,7 +450,8 @@ router.get("/financial-health", async (req: Request, res: Response) => {
         };
       })
       // Open = highest parcel charged is still below the total
-      .filter((p) => p.remaining > 0)
+      // (grupos sem parcela no mês corrente vieram como null no map)
+      .filter((p) => p !== null && p.remaining > 0)
       .sort((a, b) => a.endsAt.getTime() - b.endsAt.getTime());
 
     // Ending within the next 3 months (last parcel date inside the window)
