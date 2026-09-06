@@ -115,7 +115,7 @@ export async function parseWithGroq(text: string, userId?: string): Promise<Pars
 
   try {
     const result = await client.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
+      model: 'openai/gpt-oss-120b',
       messages: [
         { role: 'system', content: PARSING_PROMPT },
         { role: 'user', content: `Mensagem: "${text}"` },
@@ -156,7 +156,7 @@ export async function chatWithGroq(question: string, context: string, userId?: s
   const client = new Groq({ apiKey });
 
   const result = await client.chat.completions.create({
-    model: 'llama-3.3-70b-versatile',
+    model: 'openai/gpt-oss-120b',
     messages: [
       {
         role: 'system',
