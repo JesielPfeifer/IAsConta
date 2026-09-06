@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useDashboard } from '../hooks/useDashboard';
 import { useTransactions } from '../hooks/useTransactions';
-import { ArrowUpRight, ArrowDownRight, Wallet, PieChart, BarChart3, Clock, CheckSquare, CreditCard, Lightbulb, Calendar, TrendingUp, TrendingDown, DollarSign, Receipt, X } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, Wallet, PieChart, BarChart3, Clock, CheckSquare, CreditCard, Lightbulb, Calendar, TrendingUp, TrendingDown, DollarSign, Receipt, X, Landmark } from 'lucide-react';
 import { PieChart as RePie, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import dayjs from 'dayjs';
 import { api } from '../api/client';
@@ -89,6 +89,24 @@ export default function Dashboard() {
   const [bills, setBills] = useState<Bill[]>([]);
   const [incomeTx, setIncomeTx] = useState<any[]>([]);
   const [loadingExtras, setLoadingExtras] = useState(true);
+  const [accountBanks, setAccountBanks] = useState<any[]>([]);
+  const [accountTotal, setAccountTotal] = useState(0);
+  const [accountsLoading, setAccountsLoading] = useState(true);
+
+  useEffect(() => {
+    const loadBalances = async () => {
+      try {
+        const data = await api<any>('/api/pluggy/accounts');
+        setAccountBanks(Array.isArray(data?.banks) ? data.banks : []);
+        setAccountTotal(data?.total ?? 0);
+      } catch {
+        // silent — sem banco conectado ou Pluggy indisponível
+      } finally {
+        setAccountsLoading(false);
+      }
+    };
+    loadBalances();
+  }, []);
 
   useEffect(() => {
     const loadExtras = async () => {
@@ -199,6 +217,53 @@ export default function Dashboard() {
           bgIcon="bg-amber-500/10"
         />
       </div>
+
+      {/* Saldos em conta — bancos conectados via Pluggy */}
+      <SectionCard
+        title="Saldos em Conta"
+        subtitle="Valores disponíveis nos bancos conectados (Open Finance)"
+        icon={<Landmark className="h-5 w-5 text-cyan-400" />}
+        iconBg="bg-cyan-500/10"
+      >
+        {accountsLoading ? (
+          <div className="flex items-center justify-center h-16">
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-cyan-400" />
+          </div>
+        ) : accountBanks.length === 0 ? (
+          <EmptyState
+            icon={<Landmark className="h-8 w-8 text-gray-600" />}
+            text="Nenhum banco conectado — conecte seus bancos pelo Pluggy para ver os saldos aqui"
+          />
+        ) : (
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {accountBanks.map((b) => (
+                <div key={b.itemId} className="rounded-xl border border-white/5 bg-gray-900/60 p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-gray-300">{b.bank}</span>
+                    <span className="text-sm font-bold text-cyan-400 tabular-nums">{formatCurrency(b.total)}</span>
+                  </div>
+                  <div className="space-y-1">
+                    {b.accounts.map((a: any) => (
+                      <div key={a.id} className="flex items-center justify-between text-xs gap-2">
+                        <span className="text-gray-500 truncate">
+                          {a.name}
+                          {a.number ? ` (${a.number})` : ''}
+                        </span>
+                        <span className="text-gray-300 tabular-nums shrink-0">{formatCurrency(a.balance)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-between rounded-xl border border-cyan-500/20 bg-cyan-500/[0.06] px-4 py-3">
+              <span className="text-sm font-medium text-gray-300">Total em contas</span>
+              <span className="text-lg font-bold text-cyan-400 tabular-nums">{formatCurrency(accountTotal)}</span>
+            </div>
+          </div>
+        )}
+      </SectionCard>
 
       {/* Comparacao mês anterior */}
       {comparison && (

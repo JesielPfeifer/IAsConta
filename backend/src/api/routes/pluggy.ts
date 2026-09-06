@@ -60,6 +60,65 @@ router.get("/status", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/pluggy/accounts — saldos das contas bancárias por conexão
+// Retorna { banks: [{ bank, itemId, total, accounts: [{id, name, number, balance, currency}] }], total }
+router.get("/accounts", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    const creds = await credsForUser(user.id);
+    if (!creds) {
+      res.json({ banks: [], total: 0 });
+      return;
+    }
+    const connections = await prisma.bankConnection.findMany({
+      where: { userId: user.id, status: "UPDATED" },
+      orderBy: { createdAt: "asc" },
+    });
+    const client = createPluggyClient(creds);
+    const banks: Array<{
+      bank: string;
+      itemId: string;
+      total: number;
+      accounts: Array<{
+        id: string;
+        name: string;
+        number: string | null;
+        balance: number;
+        currency: string;
+      }>;
+    }> = [];
+    let total = 0;
+    for (const conn of connections) {
+      if (!conn.itemId) continue;
+      const accounts = await client.listAccounts(conn.itemId);
+      const bankAccounts = accounts
+        .filter((a) => a.type === "BANK" || a.type === "INVESTMENT")
+        .map((a) => ({
+          id: a.id,
+          name: a.name || a.marketingName || "Conta",
+          number: a.number ?? null,
+          balance: a.balance ?? 0,
+          currency: a.currencyCode ?? "BRL",
+        }));
+      const sum = bankAccounts.reduce((s, a) => s + (a.balance || 0), 0);
+      const bankName = String(conn.bankLabel || conn.bankName || conn.connectorName || "Banco");
+      if (bankAccounts.length > 0) {
+        total += sum;
+        banks.push({
+          bank: bankName,
+          itemId: conn.itemId ?? "",
+          total: sum,
+          accounts: bankAccounts,
+        });
+      }
+    }
+    res.json({ banks, total });
+  } catch (err) {
+    console.error("[pluggy] list accounts:", err);
+    res.status(500).json({ error: "Erro ao buscar saldos" });
+  }
+});
+
 // GET /api/pluggy/connectors?search=&sandbox= — institutions available
 router.get("/connectors", async (req: Request, res: Response) => {
   try {
