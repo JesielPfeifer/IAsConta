@@ -944,7 +944,11 @@ async function syncCreditCard(
     // parcela (installmentGroupKey), o que quebraria o agrupamento. Mesma compra
     // parcelada => mesma chave aqui.
     const descKey = (tx.description || "").replace(/\s+\d+\/\d+\s*$/, "").trim().toLowerCase();
-    const groupPrefix = `desc-${account.id}-${Buffer.from(descKey).toString("base64url")}`;
+    // Chave inclui o VALOR: duas compras no mesmo estabelecimento com montantes
+        // diferentes sao grupos SEPARADOS —
+        // sem isso a projecao so avanca a parcela mais alta e perde a serie da outra.
+        const groupKey = `${descKey}|${Math.round(resolveAmount(tx) * 100)}`;
+        const groupPrefix = `desc-${account.id}-${Buffer.from(groupKey).toString("base64url")}`;
     const futureReal = await prisma.transaction.count({
       where: {
         userId,
@@ -954,31 +958,47 @@ async function syncCreditCard(
         NOT: { externalId: { startsWith: "proj_" } },
       },
     });
+    // Identidade canônica das parcelas REAIS da série (installmentGroupKey:
+    // hash pluggy-* gravado no sync). O agregado abaixo precisa dela — buscar
+    // só o groupPrefix (desc-*) nunca acha as reais e cada tx viraria
+    // "a mais avançada" (recriando a projeção inteira a cada sync).
+    const realGroupId = totalInstallments > 1 ? installmentGroupKey(tx, account.id) : null;
     const isTopKnown =
       currentInstallment >=
       ((await prisma.transaction.aggregate({
         where: {
           userId,
           paymentMethod,
-          installmentGroupId: groupPrefix,
+          OR: [
+            { installmentGroupId: groupPrefix },
+            ...(realGroupId ? [{ installmentGroupId: realGroupId }] : []),
+          ],
           externalId: { not: { startsWith: "proj_" } },
         },
         _max: { currentInstallment: true },
       }))._max.currentInstallment ?? 0);
-    // Só projeta UMA vez por grupo: quando esta tx é a mais avançada conhecida
+    // Projeta quando esta tx é a mais avançada conhecida do grupo. O gate
+    // futureReal === 0 foi REMOVIDO de propósito: mesmo que o banco publique
+    // uma parcela real fora de ordem, a série deve cobrir TODOS os meses até a
+    // última parcela (continuidade mensal — sem buracos entre início e fim).
     if (
       isTopKnown &&
-      futureReal === 0 &&
       meta.billForecastDate &&
       totalInstallments > 1 &&
       currentInstallment < totalInstallments
     ) {
-      // limpa projeções antigas deste grupo (recalcula do zero)
+      // limpa projeções antigas deste grupo (recalcula do zero).
+      // OR por instalmentGroupId (grupo novo, com valor) E por prefixo proj_<tx.id>_:
+      // projeções criadas antes da inclusão do valor na chave ficaram com o grupo
+      // antigo e colidiriam no externalId único — o prefixo garante a limpeza.
       await prisma.transaction.deleteMany({
         where: {
           userId,
-          installmentGroupId: groupPrefix,
-          externalId: { startsWith: "proj_" },
+          isHidden: false,
+          OR: [
+            { installmentGroupId: groupPrefix },
+            { externalId: { startsWith: `proj_${tx.id}_` } },
+          ],
           manuallyEdited: false,
         },
       });
@@ -992,7 +1012,24 @@ async function syncCreditCard(
           const fmPre = (mIdxPre % 12) + 1;
           // Só interessa parcelas futuras: faturas passadas já foram pagas/realizadas
           const fcPre = `${fyPre}-${String(fmPre).padStart(2, "0")}`;
-          if (fcPre <= new Date().toISOString().slice(0, 7)) continue;
+          if (fcPre < new Date().toISOString().slice(0, 7)) continue;
+          // Idempotência: se o número de parcela já existe na série (real OU
+          // projeção), pula — a série continua coberta por aquele registro.
+          // Busca por descrição+valor+conta: bancos que PRÉ-GERAM parcelas
+          // futuras (alguns bancos) já têm a real com installmentGroupId próprio
+          // (pluggy-*), que não casa com o groupPrefix (desc-*) — sem essa
+          // busca por descrição, essas parcelas ganhariam uma (prev.) duplicada.
+          const jaExisteParcela = await prisma.transaction.count({
+            where: {
+              userId,
+              pluggyAccountId: account.id,
+              amount: resolveAmount(tx),
+              totalInstallments,
+              currentInstallment: currentInstallment + k,
+              description: { startsWith: descNorm },
+            },
+          });
+          if (jaExisteParcela > 0) continue;
         const mIdx = (bm - 1) + k;
         const fy = by + Math.floor(mIdx / 12);
         const fm = (mIdx % 12) + 1;
