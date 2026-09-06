@@ -958,13 +958,21 @@ async function syncCreditCard(
         NOT: { externalId: { startsWith: "proj_" } },
       },
     });
+    // Identidade canônica das parcelas REAIS da série (installmentGroupKey:
+    // hash pluggy-* gravado no sync). O agregado abaixo precisa dela — buscar
+    // só o groupPrefix (desc-*) nunca acha as reais e cada tx viraria
+    // "a mais avançada" (recriando a projeção inteira a cada sync).
+    const realGroupId = totalInstallments > 1 ? installmentGroupKey(tx, account.id) : null;
     const isTopKnown =
       currentInstallment >=
       ((await prisma.transaction.aggregate({
         where: {
           userId,
           paymentMethod,
-          installmentGroupId: groupPrefix,
+          OR: [
+            { installmentGroupId: groupPrefix },
+            ...(realGroupId ? [{ installmentGroupId: realGroupId }] : []),
+          ],
           externalId: { not: { startsWith: "proj_" } },
         },
         _max: { currentInstallment: true },
@@ -986,6 +994,7 @@ async function syncCreditCard(
       await prisma.transaction.deleteMany({
         where: {
           userId,
+          isHidden: false,
           OR: [
             { installmentGroupId: groupPrefix },
             { externalId: { startsWith: `proj_${tx.id}_` } },
@@ -1015,6 +1024,7 @@ async function syncCreditCard(
               userId,
               pluggyAccountId: account.id,
               amount: resolveAmount(tx),
+              totalInstallments,
               currentInstallment: currentInstallment + k,
               description: { startsWith: descNorm },
             },

@@ -533,6 +533,7 @@ function buildHiddenScopeWhere(
     totalInstallments: number;
     pluggyAccountId?: string | null;
     description?: string | null;
+    amount?: number | null;
   },
   userId: string
 ): Record<string, unknown> {
@@ -547,13 +548,20 @@ function buildHiddenScopeWhere(
       source: "PLUGGY",
       OR: [{ installmentGroupId: existing.installmentGroupId }],
     };
-    if (existing.pluggyAccountId) {
+    if (existing.pluggyAccountId && existing.amount != null) {
       const descKey = (existing.description || "")
         .replace(/\s+\d+\/\d+\s*$/, "")
         .trim()
         .toLowerCase();
-      const groupPrefix = `desc-${existing.pluggyAccountId}-${Buffer.from(descKey).toString("base64url")}`;
-      (scope.OR as Array<Record<string, unknown>>).push({ installmentGroupId: groupPrefix });
+      const amountCents = Math.round(existing.amount * 100);
+      // Chave nova (descKey|amountCents) usada pelas projeções atuais do sync
+      const groupPrefixNew = `desc-${existing.pluggyAccountId}-${Buffer.from(`${descKey}|${amountCents}`).toString("base64url")}`;
+      // Chave antiga (só descKey) das projeções legadas, anteriores ao grupo por valor
+      const groupPrefixOld = `desc-${existing.pluggyAccountId}-${Buffer.from(descKey).toString("base64url")}`;
+      (scope.OR as Array<Record<string, unknown>>).push(
+        { installmentGroupId: groupPrefixNew },
+        { installmentGroupId: groupPrefixOld }
+      );
     }
     return scope;
   }
