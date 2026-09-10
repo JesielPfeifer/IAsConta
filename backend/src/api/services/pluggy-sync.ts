@@ -1036,6 +1036,15 @@ async function syncCreditCard(
         const fc = `${fy}-${String(fm).padStart(2, "0")}`;
         const lastDay = new Date(Date.UTC(fy, fm, 0)).getUTCDate();
         const projExternalId = `proj_${tx.id}_${currentInstallment + k}`;
+        // Guard definitivo contra P2002 (unique userId+externalId): projeções
+        // ocultas (isHidden) ou editadas (manuallyEdited) escapam do deleteMany
+        // acima, e o jaExisteParcela por descrição/valor pode não casar (ex.:
+        // descrição editada ou case diferente). Se o externalId já existe, a
+        // parcela já está representada no banco — pula sem quebrar o sync.
+        const projJaExiste = await prisma.transaction.count({
+          where: { userId, externalId: projExternalId },
+        });
+        if (projJaExiste > 0) continue;
         await prisma.transaction.create({
           data: {
             description: `${descNorm} ${currentInstallment + k}/${totalInstallments} (prev.)`,
