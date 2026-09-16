@@ -987,10 +987,24 @@ async function syncCreditCard(
       totalInstallments > 1 &&
       currentInstallment < totalInstallments
     ) {
+      // Descrição normalizada (sem sufixo "N/M") — usada para limpar projeções
+      // antigas E para nomear as novas. Declarada aqui porque o deleteMany
+      // abaixo depende dela.
+      const descNorm = (tx.description || "").replace(/\s+\d+\/\d+\s*$/, "").trim();
       // limpa projeções antigas deste grupo (recalcula do zero).
       // OR por instalmentGroupId (grupo novo, com valor) E por prefixo proj_<tx.id>_:
       // projeções criadas antes da inclusão do valor na chave ficaram com o grupo
       // antigo e colidiriam no externalId único — o prefixo garante a limpeza.
+      // OR por descrição normalizada: o banco publica a parcela real com um
+      // externalId NOVO (id da parcela), não o da compra original — o prefixo
+      // proj_<tx.id>_ não alcança projeções antigas prefixadas com o id original.
+      // Sem isso a (prev.) duplica a fatura (dois mercados observados 2026-09).
+      // O match por descrição exige o MESMO currentInstallment: séries REAIS
+      // diferentes podem compartilhar a descrição (uma mesma loja com duas
+      // compras 10x simultâneas de valores distintos, ambas em aberto). Sem o
+      // filtro de parcela, a real de uma série apagaria a projeção FUTURA da
+      // outra (a última parcela real de uma série apagou a projeção pendente da
+      // série irmã no mês seguinte). Só a projeção da MESMA parcela é redundante.
       await prisma.transaction.deleteMany({
         where: {
           userId,
@@ -998,11 +1012,15 @@ async function syncCreditCard(
           OR: [
             { installmentGroupId: groupPrefix },
             { externalId: { startsWith: `proj_${tx.id}_` } },
+            {
+              externalId: { startsWith: "proj_" },
+              description: { startsWith: descNorm },
+              currentInstallment,
+            },
           ],
           manuallyEdited: false,
         },
       });
-      const descNorm = (tx.description || "").replace(/\s+\d+\/\d+\s*$/, "").trim();
       const baseMonth = shiftMonthKey(meta.billForecastDate, forecastOffset)!;
       const [by, bm] = baseMonth.split("-").map(Number);
       const dayOfPurchase = new Date(tx.date).getUTCDate();
@@ -1115,6 +1133,70 @@ async function syncCreditCard(
     await prisma.transaction.create({ data });
     result.transactionsCreated++;
 
+  }
+
+  // -------------------------------------------------------------
+  // Reconciliação com a fatura oficial (bill do banco): as transações
+  // que o banco publica podem divergir do valor REAL da fatura (ex.: o
+  // marcador de saldo de juros importado com valor agregado que não
+  // confere com o bill — visto 2026-09). Quando o bill oficial do mês
+  // existe, ajusta a tx marcadora de saldo (SALDO CREDITO ROTATIVO /
+  // saldo de fatura) para fazer a soma bater com o bill.
+  // -------------------------------------------------------------
+  try {
+    const bankBills = userBills.filter(
+      (b) => b.externalId && Math.abs(b.amount) > 0 && b.dueDate
+    );
+    for (const bill of bankBills) {
+      // Mês da fatura oficial = mês do vencimento (billForecastMonth usa
+      // o mesmo mês da fatura após o offset).
+      const due = new Date(bill.dueDate);
+      const billMonthKey = `${due.getUTCFullYear()}-${String(
+        due.getUTCMonth() + 1
+      ).padStart(2, "0")}`;
+      if (billMonthKey < new Date().toISOString().slice(0, 7)) continue;
+      const txsMonth = await prisma.transaction.findMany({
+        where: {
+          userId,
+          isCreditCard: true,
+          isHidden: false,
+          paymentMethod,
+          billForecastMonth: billMonthKey,
+        },
+        select: {
+          id: true,
+          description: true,
+          amount: true,
+          externalId: true,
+          manuallyEdited: true,
+        },
+      });
+      if (!txsMonth.length) continue;
+      const sumTxs = txsMonth.reduce((s, t) => s + Math.abs(t.amount), 0);
+      const diff = Math.abs(bill.amount) - sumTxs;
+      if (Math.abs(diff) < 0.5) continue; // centavos de arredondamento: ok
+      // Acha a tx marcadora de saldo da fatura (último recurso: a maior tx).
+      const saldoIdx = txsMonth.findIndex(
+        (t) =>
+          !t.manuallyEdited &&
+          /SALDO CREDITO ROTATIVO|SALDO DE FATURA|JUROS ROTATIVO|ENCARGOS/i.test(
+            t.description
+          )
+      );
+      if (saldoIdx === -1) continue; // sem marcador: não inventa ajuste
+      const saldo = txsMonth[saldoIdx];
+      const novoSaldo = Math.max(0, Math.abs(saldo.amount) + diff);
+      if (Math.abs(novoSaldo - Math.abs(saldo.amount)) < 0.01) continue;
+      await prisma.transaction.update({
+        where: { id: saldo.id },
+        data: { amount: novoSaldo },
+      });
+      logger.info(
+        `[pluggy-sync] ${paymentMethod} ${billMonthKey}: saldo ajustado ${saldo.amount} → ${novoSaldo} (fatura oficial R$${Math.abs(bill.amount)}, soma txs R$${sumTxs})`
+      );
+    }
+  } catch (recErr) {
+    logger.warn(`[pluggy-sync] reconciliação da fatura falhou: ${recErr}`);
   }
 }
 
