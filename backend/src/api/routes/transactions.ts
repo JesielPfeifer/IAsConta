@@ -797,7 +797,7 @@ botRouter.put("/:id", async (req: Request, res: Response) => {
     // conta é do mês atual ou do mês que vem e grava a resposta aqui.
     if (req.body.referenceMonth !== undefined) {
       const rm = req.body.referenceMonth;
-      if (rm === null || (typeof rm === "string" && /^\d{4}-\d{2}$/.test(rm))) {
+      if (rm === null || (typeof rm === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(rm))) {
         updateData.referenceMonth = rm;
       } else {
         res.status(400).json({ error: 'referenceMonth inválido (use "YYYY-MM" ou null)' });
