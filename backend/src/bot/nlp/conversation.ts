@@ -3,9 +3,16 @@
 
 interface PendingState {
   transactionId: string;
-  question: 'fixa' | 'parcelas' | null;
+  question: 'fixa' | 'mes' | 'parcelas' | null;
   userId: string;
   timestamp: number;
+  // true quando o lançamento era despesa (conta) — habilita a pergunta do mês
+  // ("atual" ou "mês que vem") no fluxo de perguntas rápidas.
+  askMonth?: boolean;
+  // Marcados conforme as respostas do usuário, usados nas recapitulações
+  // (ex.: "✅ Conta fixa · Mês: Outubro → Quantas parcelas?").
+  isFixed?: boolean;
+  referenceMonth?: string; // competência escolhida ("YYYY-MM")
 }
 
 const pendingStates = new Map<string, PendingState>();

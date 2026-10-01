@@ -770,7 +770,7 @@ botRouter.post("/", async (req: Request, res: Response) => {
   }
 });
 
-// Bot-authenticated PUT for updating transactions (isFixed, installments, etc.)
+// Bot-authenticated PUT for updating transactions (isFixed, parcelas e competência)
 botRouter.put("/:id", async (req: Request, res: Response) => {
   try {
     const userId = await getBotUserId(req);
@@ -793,42 +793,17 @@ botRouter.put("/:id", async (req: Request, res: Response) => {
     if (req.body.totalInstallments !== undefined) updateData.totalInstallments = req.body.totalInstallments;
     if (req.body.currentInstallment !== undefined) updateData.currentInstallment = req.body.currentInstallment;
     if (req.body.installmentGroupId !== undefined) updateData.installmentGroupId = req.body.installmentGroupId;
-
-    const transaction = await prisma.transaction.update({
-      where: { id: id as string },
-      data: updateData as any,
-    });
-
-    res.json(transaction);
-  } catch (err) {
-    logger.error(err);
-    res.status(500).json({ error: "Erro interno" });
-  }
-});
-
-// Bot-authenticated PUT for updating transactions (isFixed, installments, etc.)
-botRouter.put("/:id", async (req: Request, res: Response) => {
-  try {
-    const userId = await getBotUserId(req);
-    if (!userId) {
-      res.status(400).json({ error: "No user found" });
-      return;
+    // Competência ("YYYY-MM" ou null): o fluxo do bot pergunta ao usuário se a
+    // conta é do mês atual ou do mês que vem e grava a resposta aqui.
+    if (req.body.referenceMonth !== undefined) {
+      const rm = req.body.referenceMonth;
+      if (rm === null || (typeof rm === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(rm))) {
+        updateData.referenceMonth = rm;
+      } else {
+        res.status(400).json({ error: 'referenceMonth inválido (use "YYYY-MM" ou null)' });
+        return;
+      }
     }
-
-    const { id } = req.params;
-    const existing = await prisma.transaction.findFirst({
-      where: { id: id as string, userId },
-    });
-    if (!existing) {
-      res.status(404).json({ error: "Transação não encontrada" });
-      return;
-    }
-
-    const updateData: Record<string, unknown> = {};
-    if (req.body.isFixed !== undefined) updateData.isFixed = req.body.isFixed;
-    if (req.body.totalInstallments !== undefined) updateData.totalInstallments = req.body.totalInstallments;
-    if (req.body.currentInstallment !== undefined) updateData.currentInstallment = req.body.currentInstallment;
-    if (req.body.installmentGroupId !== undefined) updateData.installmentGroupId = req.body.installmentGroupId;
 
     const transaction = await prisma.transaction.update({
       where: { id: id as string },

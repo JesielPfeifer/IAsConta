@@ -12,6 +12,79 @@ export interface ProcessResult {
   message: string;
 }
 
+// ---------------------------------------------------------------------------
+// Mês de competência — fluxo "mês atual ou mês que vem" ao registrar conta.
+// ---------------------------------------------------------------------------
+
+// Chave "YYYY-MM" do mês corrente (offset 0) ou relativo (1 = mês que vem).
+function monthKey(offset = 0): string {
+  const now = new Date();
+  const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// Nome do mês em pt-BR a partir da chave ("2026-10" -> "Outubro"), usado nas
+// mensagens de confirmação/recapitulação.
+function monthLabel(key: string): string {
+  const [y, m] = key.split('-').map(Number);
+  const label = new Date(y, m - 1, 1).toLocaleDateString('pt-BR', { month: 'long' });
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+// Sufixo "🗓️ Mês: *X*" para as mensagens finais quando o mês foi escolhido.
+function monthRecap(key?: string | null): string {
+  return key ? `\n🗓️ Mês: *${monthLabel(key)}*` : '';
+}
+
+// Resposta da pergunta do mês: define a competência ou pula.
+type MonthAnswer = { action: 'set'; ref: string } | { action: 'skip' };
+
+// Nome (ou abreviação) do mês -> número, já normalizado (sem acentos).
+const MONTH_NAMES: Record<string, number> = {
+  janeiro: 1, fevereiro: 2, marco: 3, abril: 4, maio: 5, junho: 6,
+  julho: 7, agosto: 8, setembro: 9, outubro: 10, novembro: 11, dezembro: 12,
+  jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12,
+};
+
+// Ocorrência mais próxima do mês (1..12) como "YYYY-MM": meses passados
+// recentes contam como competência retroativa (ex.: "julho" respondido em
+// agosto); meses que ficariam muito no passado vão para o ano seguinte.
+function nearestMonthKey(month: number): string {
+  const now = new Date();
+  const curY = now.getFullYear();
+  const curM = now.getMonth() + 1;
+  let d = month - curM;
+  if (d < -6) d += 12;
+  if (d > 6) d -= 12;
+  if (d === -6) d = 6; // empate: prefere o futuro
+  const base = new Date(curY, curM - 1 + d, 1);
+  return `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// Dica de resposta do mês com exemplo dinâmico (ex.: "_outubro_ ou _10_").
+function monthAnswerHint(): string {
+  const name = monthLabel(monthKey(0)).toLowerCase();
+  const num = String(Number(monthKey(0).split('-')[1]));
+  return `_${name}_ ou _${num}_`;
+}
+
+// Interpreta a resposta da pergunta do mês: atual, "mês que vem", o mês pelo
+// nome/número (ex.: "outubro", "10") ou pular.
+function parseMonthAnswer(answer: string): MonthAnswer | null {
+  const norm = answer
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[.!?]+$/, '')
+    .trim();
+  if (/^(atual|este|esse|este mes|esse mes|mes atual)$/.test(norm)) return { action: 'set', ref: monthKey(0) };
+  if (/^(mes que vem|que vem|proximo|proximo mes|mes seguinte)$/.test(norm)) return { action: 'set', ref: monthKey(1) };
+  if (/^(pular|depois|deixa)$/.test(norm)) return { action: 'skip' };
+  const numMatch = /^(\d{1,2})$/.exec(norm);
+  const month = numMatch ? parseInt(numMatch[1]) : MONTH_NAMES[norm];
+  if (month && month >= 1 && month <= 12) return { action: 'set', ref: nearestMonthKey(month) };
+  return null;
+}
+
 function formatConfirmation(parsed: ParsedTransaction): string {
   const isIncome = parsed.transaction_type === 'income';
   const typeLabel = isIncome ? 'Receita' : 'Despesa';
@@ -56,30 +129,41 @@ function formatConfirmation(parsed: ParsedTransaction): string {
     msg += `📅 *Data:* ${parsed.due_date.split('-').reverse().join('/')}\n`;
   }
   
-  // Ask questions for better categorization
+  // Próximas perguntas do fluxo: conta fixa → mês (só despesa) → parcelas.
+  const askMonth = !isIncome;
+  const detectedInstallments =
+    parsed.installments && parsed.installments.total > 1 ? parsed.installments : null;
+
   msg += `\n━━━━━━━━━━━━━━\n`;
   msg += `🤔 *Perguntas rápidas:*\n`;
   msg += `• É uma *conta fixa*? Responda _sim_ ou _nao_\n`;
 
-  // Only ask about installments if not already detected
-  if (!parsed.installments || parsed.installments.total <= 1) {
-    msg += `• Foi *parcelado*? Responda _sim_ ou _nao_\n`;
-  } else {
-    msg += `• Parcelado em *${parsed.installments.total}x* detectado! ✓\n`;
+  if (askMonth) {
+    msg += `• É do *mês atual* (${monthLabel(monthKey(0))}) ou do *mês que vem* (${monthLabel(monthKey(1))})? Responda _atual_, _mes que vem_ ou o mês direto (ex.: ${monthAnswerHint()})\n`;
   }
 
-  // How to answer (clears up the follow-up flow). When installments were
-  // already detected there is only ONE question left (conta fixa) — telling
-  // the user to answer "nas duas" would confuse the follow-up state machine.
-  msg += `\n💡 *Como responder:*\n`;
-  if (parsed.installments && parsed.installments.total > 1) {
-    msg += `• Responda _sim_ ou _nao_\n`;
-    msg += `• Para cancelar: envie _nao_\n`;
+  // Only ask about installments if not already detected
+  if (!detectedInstallments) {
+    msg += `• Foi *parcelado*? Responda _sim_ ou _nao_\n`;
   } else {
+    msg += `• Parcelado em *${detectedInstallments.total}x* detectado! ✓\n`;
+  }
+
+  // Como responder — alinhado com a máquina de estados em processMessage.
+  msg += `\n💡 *Como responder:*\n`;
+  if (askMonth && !detectedInstallments) {
+    msg += `• Uma por vez: _sim_, depois o mês (_atual_, _mes que vem_ ou o mês direto), depois _nao_\n`;
+    msg += `• Tudo junto, na ordem: _sim, atual, nao_ (conta fixa · mês · parcelado)\n`;
+    msg += `• Se foi parcelado, mande só o número de vezes: _3_, _6_, _10_...`;
+  } else if (askMonth && detectedInstallments) {
+    msg += `• Uma por vez: _sim_, depois o mês (_atual_, _mes que vem_ ou o mês direto)\n`;
+    msg += `• Tudo junto: _sim, mes que vem_ (conta fixa · mês)`;
+  } else if (!detectedInstallments) {
     msg += `• Uma por vez: _sim_ ou _nao_\n`;
     msg += `• As duas juntas: _sim e sim_ ou _sim, nao_\n`;
-    msg += `• Se foi parcelado, mande só o número de vezes: _3_, _6_, _10_...\n`;
-    msg += `• Para cancelar: envie _nao_ nas duas`;
+    msg += `• Se foi parcelado, mande só o número de vezes: _3_, _6_, _10_...`;
+  } else {
+    msg += `• Responda _sim_ ou _nao_`;
   }
 
   return msg;
@@ -233,55 +317,94 @@ export async function processMessage(
     return { success: true, message: cmdResult.message };
   }
 
-  // --- PENDING CONVERSATION: handle "sim/nao" replies ---
+  // --- PENDING CONVERSATION: handle replies to the quick questions ---
   const pending = getPendingState(senderInfo?.senderId);
   if (pending && botUserId) {
     const lower = text.toLowerCase().trim();
-    
-    // Parse combined answers: "sim e sim", "sim, sim", "sim e nao"
-    const answers = lower.split(/\s+(?:e|,)\s+/).map(s => s.trim());
-    
-    // Process each answer sequentially
+
+    // Parse combined answers: "sim e nao", "sim, nao", "sim, atual, nao"
+    const answers = lower.split(/\s*,\s*|\s+e\s+/).map(s => s.trim()).filter(Boolean);
+
     for (const answer of answers) {
       if (!pending) break;
-      
+
       if (pending.question === 'fixa') {
         if (/^(sim|s|yes|y|claro|verdade|isso|correto)$/i.test(answer)) {
-          await callApi(`/api/transactions/bot/${pending.transactionId}`, { isFixed: true }, 'PUT').catch(() => {});
-          // Move to next question
-          pending.question = 'parcelas';
+          await callApi(`/api/transactions/bot/${pending.transactionId}`, { isFixed: true, userId: pending.userId }, 'PUT').catch(() => {});
+          pending.isFixed = true;
+          pending.question = pending.askMonth ? 'mes' : 'parcelas';
           continue;
         } else if (/^(n[ãa]o|nao|n|nop|negativo)$/i.test(answer)) {
+          pending.question = pending.askMonth ? 'mes' : 'parcelas';
+          continue;
+        } else if (pending.askMonth && parseMonthAnswer(answer)) {
+          // Responderam o mês direto: pula a conta fixa e processa o mês abaixo.
+          pending.question = 'mes';
+        }
+      }
+
+      if (pending.question === 'mes') {
+        const monthAnswer = parseMonthAnswer(answer);
+        if (monthAnswer?.action === 'set') {
+          await callApi(`/api/transactions/bot/${pending.transactionId}`, { referenceMonth: monthAnswer.ref, userId: pending.userId }, 'PUT').catch(() => {});
+          pending.referenceMonth = monthAnswer.ref;
           pending.question = 'parcelas';
           continue;
         }
+        if (monthAnswer?.action === 'skip') {
+          // segue sem competência (usa a data do lançamento)
+          pending.question = 'parcelas';
+          continue;
+        }
+        // Resposta que não é de mês: "sim/nao" (ex.: "sim, nao" do fluxo de
+        // duas respostas) avança para as parcelas e é reaproveitado abaixo;
+        // qualquer outro texto mantém a pergunta do mês aberta.
+        if (/^(sim|s|yes|y|n[ãa]o|nao|n|nop|negativo)$/i.test(answer)) {
+          pending.question = 'parcelas';
+        } else {
+          continue;
+        }
       }
-      
+
       if (pending.question === 'parcelas') {
         const numMatch = /^(\d+)$/.exec(answer);
         if (numMatch) {
           const total = parseInt(numMatch[1]);
           if (total > 1 && total <= 36) {
             await callApi(`/api/transactions/bot/${pending.transactionId}`, {
-              totalInstallments: total, currentInstallment: 1,
+              totalInstallments: total, currentInstallment: 1, userId: pending.userId,
             }, 'PUT').catch(() => {});
             clearPendingState(senderInfo.senderId);
-            return { success: true, message: `✅ Marcado como *${total}x parcelado*!` };
+            return { success: true, message: `✅ Marcado como *${total}x parcelado*!${monthRecap(pending.referenceMonth)}` };
           }
         }
         if (/^(sim|s|yes|y)$/i.test(answer)) {
-          return { success: true, message: '❓ Quantas parcelas? Digite um numero (ex: 3).' };
+          return { success: true, message: '❓ Quantas parcelas? Digite um número (ex: 3) ou _nao_ para a vista.' };
         }
         if (/^(n[ãa]o|nao|n|nop|negativo)$/i.test(answer)) {
           clearPendingState(senderInfo.senderId);
-          return { success: true, message: '👍 Ok! Pagamento a vista.' };
+          return { success: true, message: `👍 Ok! Pagamento à vista.${monthRecap(pending.referenceMonth)}` };
         }
       }
     }
-    
-    // If both questions answered but no final response, confirm
+
+    // Ainda falta responder alguma pergunta: envia a próxima da fila.
+    if (pending.question === 'mes') {
+      const prefix = pending.isFixed ? '✅ Conta fixa!\n\n' : '';
+      return {
+        success: true,
+        message: `${prefix}🗓️ É do *mês atual* (${monthLabel(monthKey(0))}) ou do *mês que vem* (${monthLabel(monthKey(1))})? Responda _atual_, _mes que vem_ ou o mês direto (ex.: ${monthAnswerHint()}).`,
+      };
+    }
     if (pending.question === 'parcelas') {
-      return { success: true, message: '✅ Marcado como *conta fixa*!\n\n❓ Quantas parcelas? Digite um numero (ex: 3) ou _nao_ para a vista.' };
+      const marks: string[] = [];
+      if (pending.isFixed) marks.push('Conta fixa');
+      if (pending.referenceMonth) marks.push(`Mês: *${monthLabel(pending.referenceMonth)}*`);
+      const prefix = marks.length > 0 ? `✅ ${marks.join(' · ')}\n\n` : '';
+      return {
+        success: true,
+        message: `${prefix}❓ Quantas parcelas? Digite um número (ex: 3) ou _nao_ para a vista.`,
+      };
     }
     return { success: true, message: '' };
   }
@@ -585,6 +708,7 @@ export async function processMessage(
         question: 'fixa',
         userId: botUserId,
         timestamp: Date.now(),
+        askMonth: parsed.transaction_type === 'expense',
       });
     }
 
