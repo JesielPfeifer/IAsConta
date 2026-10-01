@@ -797,7 +797,14 @@ async function syncCreditCard(
   // fatura). Ignorar para não duplicar o gasto (fatura já conta 1x).
   const userBills = await prisma.bill.findMany({
     where: { userId, source: "PLUGGY" },
-    select: { id: true, externalId: true, amount: true, dueDate: true },
+    select: {
+      id: true,
+      externalId: true,
+      amount: true,
+      dueDate: true,
+      pluggyAccountId: true,
+      manuallyEdited: true,
+    },
   });
   // Pluggy transaction meta.billId is the PLUGGY bill id; the local Bill row
   // has its own uuid with externalId = pluggy id. Map one to the other so
@@ -1016,6 +1023,12 @@ async function syncCreditCard(
               externalId: { startsWith: "proj_" },
               description: { startsWith: descNorm },
               currentInstallment,
+              // Só projeções DESTA conta e DESTA série: séries irmãs podem
+              // compartilhar descrição e a mesma parcela com valores
+              // diferentes — sem conta+valor a parcela real de uma apagaria
+              // a projeção da outra.
+              pluggyAccountId: account.id,
+              amount: resolveAmount(tx),
             },
           ],
           manuallyEdited: false,
@@ -1144,8 +1157,16 @@ async function syncCreditCard(
   // saldo de fatura) para fazer a soma bater com o bill.
   // -------------------------------------------------------------
   try {
+    // Só faturas bancárias NÃO editadas manualmente e DESTA conta: a edição
+    // manual (que o sync preserva) não é a referência "oficial", e faturas
+    // de outro cartão não podem participar da reconciliação desta conta.
     const bankBills = userBills.filter(
-      (b) => b.externalId && Math.abs(b.amount) > 0 && b.dueDate
+      (b) =>
+        b.externalId &&
+        Math.abs(b.amount) > 0 &&
+        b.dueDate &&
+        !b.manuallyEdited &&
+        b.pluggyAccountId === account.id
     );
     for (const bill of bankBills) {
       // Mês da fatura oficial = mês do vencimento (billForecastMonth usa
@@ -1162,6 +1183,7 @@ async function syncCreditCard(
           isHidden: false,
           paymentMethod,
           billForecastMonth: billMonthKey,
+          pluggyAccountId: account.id,
         },
         select: {
           id: true,
