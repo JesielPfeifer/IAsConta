@@ -11,6 +11,7 @@ interface Bill {
   id: string;
   name: string;
   source?: 'MANUAL' | 'PLUGGY' | string;
+  paymentMethod?: string | null;
   amount: number;
   dueDate: string;
   isRecurring: boolean;
@@ -20,6 +21,15 @@ interface Bill {
   totalInstallments: number;
   currentInstallment: number;
   category?: { id: string; name: string } | null;
+}
+
+// A fatura oficial (Pluggy) "cobre" o cartão quando o método normalizado
+// bate; bills antigas sem paymentMethod caem no fallback por nome.
+function billCoversMethod(b: Bill, pm: string): boolean {
+  if (b.source !== 'PLUGGY') return false;
+  return b.paymentMethod
+    ? String(b.paymentMethod).toLowerCase() === String(pm).toLowerCase()
+    : b.name.toLowerCase().includes(String(pm).toLowerCase());
 }
 
 function formatCurrency(value: number) {
@@ -136,8 +146,7 @@ export default function Bills() {
         for (const c of cards || []) {
           if (!c.total || !c.count) continue;
           const official = base.some(
-            (b) => b.source === 'PLUGGY' && b.name.toLowerCase().includes(String(c.paymentMethod).toLowerCase())
-              && dayjs(b.dueDate).format('YYYY-MM') === m
+            (b) => billCoversMethod(b, c.paymentMethod) && dayjs(b.dueDate).format('YYYY-MM') === m
           );
           if (!official) {
             list.push({ paymentMethod: c.paymentMethod, total: c.total, count: c.count, month: m });
@@ -286,9 +295,7 @@ const filteredBills = bills.filter((b) => {
   // Total Pendente para o planejamento bater com a realidade do mês.
   const forecastKey = `${yearFilter}-${String(monthFilter).padStart(2, '0')}`;
   const hasOfficialFor = (pm: string) => bills.some(
-    (b) => b.source === 'PLUGGY'
-      && dayjs(b.dueDate).format('YYYY-MM') === forecastKey
-      && b.name.toLowerCase().includes(String(pm).toLowerCase())
+    (b) => billCoversMethod(b, pm) && dayjs(b.dueDate).format('YYYY-MM') === forecastKey
   );
   const monthForecasts = forecasts.filter(
     (f: ForecastCard) => f.month === forecastKey && !hasOfficialFor(f.paymentMethod)
@@ -395,9 +402,7 @@ const filteredBills = bills.filter((b) => {
       {(() => {
         const mk = `${yearFilter}-${String(monthFilter).padStart(2, '0')}`;
         const hasOfficial = (pm: string) => bills.some(
-          (b) => b.source === 'PLUGGY'
-            && dayjs(b.dueDate).format('YYYY-MM') === mk
-            && b.name.toLowerCase().includes(String(pm).toLowerCase())
+          (b) => billCoversMethod(b, pm) && dayjs(b.dueDate).format('YYYY-MM') === mk
         );
         const rows = forecasts.filter((f: ForecastCard) => f.month === mk && !hasOfficial(f.paymentMethod));
         if (rows.length === 0) return null;
