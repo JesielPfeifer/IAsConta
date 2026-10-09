@@ -282,6 +282,22 @@ function normalizePaymentMethod(account: PluggyAccount, connectorName?: string |
   return "CARTAO";
 }
 
+/** Payment method of a credit-card account: normalizePaymentMethod() with the
+ * item's bank as fallback when the card account name is generic — the exact
+ * same rule used by the transaction import, so Bills can match the official
+ * fatura to the projected one. */
+function cardPaymentMethod(
+  account: PluggyAccount,
+  connectorName?: string | null,
+  itemBankName?: string | null
+): string {
+  let paymentMethod = normalizePaymentMethod(account, connectorName);
+  if (paymentMethod === "CARTAO" && itemBankName) {
+    paymentMethod = itemBankName.replace(/\s+/g, "_");
+  }
+  return paymentMethod;
+}
+
 /** True when a bank-account transaction looks like a payment (boleto, PIX,
  * transfer, invoice settlement...). Generic — the amount check against the
  * user's faturas happens separately, so no bank/name is hardcoded. */
@@ -462,7 +478,7 @@ export async function syncItem(itemId: string, userId: string): Promise<SyncResu
     try {
       const bills = await client.listBills(account.id);
       for (const bill of bills) {
-        await upsertBill(bill, account, userId, result);
+        await upsertBill(bill, account, userId, result, pluggyItem.connector?.name, itemBankName);
       }
     } catch (err) {
       result.errors.push(
@@ -783,14 +799,9 @@ async function syncCreditCard(
 
   // --- Transactions (purchases) ---
   const transactions = await client.listTransactions(account.id);
-  let paymentMethod = normalizePaymentMethod(account, connectorName);
-  // Card account name is generic ("platinum", "gold") — use the item's bank
-  // (from its checking account) so the payment method reads "NUBANK".
-  // Normalize spaces the same way normalizePaymentMethod does, so aliases
-  // like "BANCO DO BRASIL" don't create a second payment method.
-  if (paymentMethod === "CARTAO" && itemBankName) {
-    paymentMethod = itemBankName.replace(/\s+/g, "_");
-  }
+  // Método normalizado do cartão (fallback pelo banco do item quando o nome
+  // da conta é genérico), igual ao usado nas transações.
+  const paymentMethod = cardPaymentMethod(account, connectorName, itemBankName);
 
   // Faturas do usuário — pagamento da fatura via boleto aparece TAMBÉM na
   // conta do cartão ("PAGTO.BOLETO", "PGTO.BOLETO REGISTRADO" com valor da
@@ -1117,6 +1128,10 @@ async function syncCreditCard(
         existing.description !== data.description ||
         existing.date.getTime() !== data.date.getTime() ||
         existing.billId !== data.billId ||
+        // Método normalizado é recalculado a cada sync (o fallback pelo banco
+        // do item pode mudar): sem persistir, o card-cycle agrupa por um
+        // método stale e a prevista não é suprimida pela fatura oficial.
+        existing.paymentMethod !== data.paymentMethod ||
         existing.person !== data.person ||
         existing.billForecastMonth !== data.billForecastMonth ||
         existing.installmentGroupId !== data.installmentGroupId ||
@@ -1131,6 +1146,7 @@ async function syncCreditCard(
             description: data.description,
             date: data.date,
             billId: data.billId,
+            paymentMethod: data.paymentMethod,
             person: data.person,
             billForecastMonth: data.billForecastMonth,
             currentInstallment: data.currentInstallment,
@@ -1226,7 +1242,9 @@ async function upsertBill(
   bill: PluggyBill,
   account: PluggyAccount,
   userId: string,
-  result: SyncResult
+  result: SyncResult,
+  connectorName?: string | null,
+  itemBankName?: string | null
 ): Promise<void> {
   const existing = await prisma.bill.findUnique({
     where: { userId_externalId: { userId, externalId: bill.id } },
@@ -1245,6 +1263,10 @@ async function upsertBill(
     year: "numeric",
   })}`;
 
+  // Mesmo método normalizado das transações — o front usa para esconder a
+  // fatura prevista quando a oficial do mês já existe.
+  const paymentMethod = cardPaymentMethod(account, connectorName, itemBankName);
+
   const data = {
     name,
     amount: Math.abs(bill.totalAmount),
@@ -1255,21 +1277,41 @@ async function upsertBill(
     source: "PLUGGY" as const,
     externalId: bill.id,
     pluggyAccountId: account.id,
+    paymentMethod,
     userId,
   };
 
   if (existing) {
-    // Fatura editada manualmente: preserva valor/vencimento/status/nome.
-    if (existing.manuallyEdited) return;
+    // Fatura editada manualmente: preserva valor/vencimento/status/nome —
+    // mas o paymentMethod é metadado do sistema (não editável pelo usuário)
+    // e continua sendo mantido; sem isso, faturas editadas antigas ficam com
+    // o campo null e a "fatura prevista" nunca é suprimida por elas.
+    if (existing.manuallyEdited) {
+      if (existing.paymentMethod !== paymentMethod) {
+        await prisma.bill.update({
+          where: { id: existing.id },
+          data: { paymentMethod },
+        });
+        result.billsUpdated++;
+      }
+      return;
+    }
     const changed =
       existing.amount !== data.amount ||
       existing.dueDate.getTime() !== data.dueDate.getTime() ||
       existing.isPaid !== data.isPaid ||
-      existing.name !== data.name;
+      existing.name !== data.name ||
+      existing.paymentMethod !== data.paymentMethod;
     if (changed) {
       await prisma.bill.update({
         where: { id: existing.id },
-        data: { amount: data.amount, dueDate: data.dueDate, isPaid: data.isPaid, name: data.name },
+        data: {
+          amount: data.amount,
+          dueDate: data.dueDate,
+          isPaid: data.isPaid,
+          name: data.name,
+          paymentMethod: data.paymentMethod,
+        },
       });
       result.billsUpdated++;
     }

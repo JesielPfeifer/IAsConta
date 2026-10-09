@@ -124,6 +124,11 @@ model Bill {
   source            Source    @default(MANUAL)
   externalId        String?   // Pluggy bill id (fatura) — dedupe
   pluggyAccountId   String?   // Pluggy credit card account id
+  // Método de pagamento normalizado do cartão (mesmo critério usado nas
+  // transações) — permite esconder a "fatura prevista" quando a oficial
+  // (Pluggy) do mês já existe, mesmo que o nome da conta do cartão não
+  // contenha o método.
+  paymentMethod     String?
   // Marcado quando o usuário edita uma fatura importada do Pluggy: o sync
   // preserva valor/vencimento/pagamento editados (não sobrescreve).
   manuallyEdited    Boolean   @default(false)
