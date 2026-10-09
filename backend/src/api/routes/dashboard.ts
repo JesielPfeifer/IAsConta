@@ -95,6 +95,19 @@ function getMonthRange(month?: string): { start: Date; end: Date } {
 }
 
 /**
+ * Regra única dos totais do dashboard: transações importadas do Pluggy que
+ * NÃO são de cartão de crédito (PIX, TED, débito em conta) não entram em
+ * nenhum total — só contam quando lançadas manualmente (MANUAL/BOT). Vale
+ * para QUALQUER pessoa (HUSBAND/WIFE/COUPLE) e mantém /summary, /comparison,
+ * /by-category, /by-payment, /year-analysis e /percentage coerentes entre si.
+ */
+function isCountableTx<
+  T extends { source?: string | null; isCreditCard?: boolean | null }
+>(tx: T): boolean {
+  return tx.source !== "PLUGGY" || !!tx.isCreditCard;
+}
+
+/**
  * Shared credit-card predicate for /credit-card-total and /credit-card-detail.
  * A transaction is "card" when it was synced from Pluggy (isCreditCard=true)
  * or its payment method is configured as CARD. The isCreditCard flag is the
@@ -151,8 +164,11 @@ async function cardTransactionWhere(userId: string, start: Date, end: Date) {
       {
         OR: [
           { isCreditCard: true },
-          // Legacy rows: payment method configured as CARD by the user
-          { paymentMethod: { in: cardMethods.map((m) => m.name) } },
+          // Legacy/manual rows: forma de pagamento marcada como CARD pelo
+          // usuário — restrito a lançamentos NÃO-Pluggy, senão PIX/TED/débito
+          // importados da conta corrente (mesmo nome do banco) entrariam como
+          // compra do cartão e inflariam o total (ex.: DEB PIX CHAVE).
+          { source: { not: "PLUGGY" as const }, paymentMethod: { in: cardMethods.map((m) => m.name) } },
         ],
       },
     ],
@@ -219,7 +235,7 @@ router.get("/summary", async (req: Request, res: Response) => {
       // (PIX, TED, débito em conta) não entram nos totais — só passam a
       // contar quando lançadas manualmente. Vale para QUALQUER pessoa
       // (HUSBAND/WIFE/COUPLE), não só para lançamentos sem pessoa atribuída.
-      if (tx.source === "PLUGGY" && !tx.isCreditCard) continue;
+      if (!isCountableTx(tx)) continue;
 
       if (person === "COUPLE") {
         const half = amount / 2;
@@ -325,7 +341,7 @@ router.get("/by-category", async (req: Request, res: Response) => {
         },
         include: { category: true },
       })
-    );
+    ).filter(isCountableTx);
     const bills = await prisma.bill.findMany({
       where: {
         userId: user.id,
@@ -376,7 +392,7 @@ router.get("/percentage", async (req: Request, res: Response) => {
           billId: null,
         },
       })
-    );
+    ).filter(isCountableTx);
     const bills = await prisma.bill.findMany({
       where: {
         userId: user.id,
@@ -478,7 +494,7 @@ router.get("/by-payment", async (req: Request, res: Response) => {
     ]);
 
     const byPayment: Record<string, number> = {};
-    for (const tx of filterInternalTransfers(transactions)) {
+    for (const tx of filterInternalTransfers(transactions).filter(isCountableTx)) {
       const method = tx.paymentMethod || "Outros";
       byPayment[method] = (byPayment[method] || 0) + tx.amount;
     }
@@ -529,7 +545,8 @@ router.get("/comparison", async (req: Request, res: Response) => {
     prevStart.setMonth(prevStart.getMonth() - 1);
     const prevEnd = new Date(start);
 
-    // Bill-aware comparison (same rule as /summary): faturas count once.
+    // Bill-aware comparison (same rule as /summary): faturas contam 1x e
+    // transações Pluggy não-cartão ficam fora dos totais.
     const [currTx, prevTx, currBills, prevBills] = await Promise.all([
       prisma.transaction.findMany({ where: { userId: user.id, date: { gte: start, lt: end }, billId: null, isHidden: false } }),
       prisma.transaction.findMany({ where: { userId: user.id, date: { gte: prevStart, lt: prevEnd }, billId: null, isHidden: false } }),
@@ -537,11 +554,13 @@ router.get("/comparison", async (req: Request, res: Response) => {
       prisma.bill.findMany({ where: { userId: user.id, dueDate: { gte: prevStart, lt: prevEnd } } }),
     ]);
 
-    const currIncome = filterInternalTransfers(currTx).filter((t) => t.type === "INCOME").reduce((s, t) => s + t.amount, 0);
-    const currExpense = filterInternalTransfers(currTx).filter((t) => t.type === "EXPENSE").reduce((s, t) => s + t.amount, 0)
+    const currTxCounted = filterInternalTransfers(currTx).filter(isCountableTx);
+    const prevTxCounted = filterInternalTransfers(prevTx).filter(isCountableTx);
+    const currIncome = currTxCounted.filter((t) => t.type === "INCOME").reduce((s, t) => s + t.amount, 0);
+    const currExpense = currTxCounted.filter((t) => t.type === "EXPENSE").reduce((s, t) => s + t.amount, 0)
       + currBills.reduce((s, b) => s + b.amount, 0);
-    const prevIncome = filterInternalTransfers(prevTx).filter((t) => t.type === "INCOME").reduce((s, t) => s + t.amount, 0);
-    const prevExpense = filterInternalTransfers(prevTx).filter((t) => t.type === "EXPENSE").reduce((s, t) => s + t.amount, 0)
+    const prevIncome = prevTxCounted.filter((t) => t.type === "INCOME").reduce((s, t) => s + t.amount, 0);
+    const prevExpense = prevTxCounted.filter((t) => t.type === "EXPENSE").reduce((s, t) => s + t.amount, 0)
       + prevBills.reduce((s, b) => s + b.amount, 0);
 
     const diffIncome = currIncome - prevIncome;
@@ -584,7 +603,7 @@ router.get("/year-analysis", async (req: Request, res: Response) => {
     const byMonth: Record<string, number> = {};
     const byCategory: Record<string, number> = {};
 
-    for (const tx of filterInternalTransfers(transactions)) {
+    for (const tx of filterInternalTransfers(transactions).filter(isCountableTx)) {
       const m = `${tx.date.getFullYear()}-${String(tx.date.getMonth() + 1).padStart(2, "0")}`;
       byMonth[m] = (byMonth[m] || 0) + tx.amount;
       const cat = tx.category?.name || "Outros";
@@ -635,7 +654,7 @@ router.get("/tip", async (req: Request, res: Response) => {
     ]);
 
     const byCategory = new Map<string, number>();
-    for (const tx of filterInternalTransfers(transactions)) {
+    for (const tx of filterInternalTransfers(transactions).filter(isCountableTx)) {
       const cat = tx.category?.name || "Outros";
       byCategory.set(cat, (byCategory.get(cat) || 0) + tx.amount);
     }
