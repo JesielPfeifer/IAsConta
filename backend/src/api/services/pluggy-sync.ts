@@ -1128,6 +1128,10 @@ async function syncCreditCard(
         existing.description !== data.description ||
         existing.date.getTime() !== data.date.getTime() ||
         existing.billId !== data.billId ||
+        // Método normalizado é recalculado a cada sync (o fallback pelo banco
+        // do item pode mudar): sem persistir, o card-cycle agrupa por um
+        // método stale e a prevista não é suprimida pela fatura oficial.
+        existing.paymentMethod !== data.paymentMethod ||
         existing.person !== data.person ||
         existing.billForecastMonth !== data.billForecastMonth ||
         existing.installmentGroupId !== data.installmentGroupId ||
@@ -1142,6 +1146,7 @@ async function syncCreditCard(
             description: data.description,
             date: data.date,
             billId: data.billId,
+            paymentMethod: data.paymentMethod,
             person: data.person,
             billForecastMonth: data.billForecastMonth,
             currentInstallment: data.currentInstallment,
@@ -1277,8 +1282,20 @@ async function upsertBill(
   };
 
   if (existing) {
-    // Fatura editada manualmente: preserva valor/vencimento/status/nome.
-    if (existing.manuallyEdited) return;
+    // Fatura editada manualmente: preserva valor/vencimento/status/nome —
+    // mas o paymentMethod é metadado do sistema (não editável pelo usuário)
+    // e continua sendo mantido; sem isso, faturas editadas antigas ficam com
+    // o campo null e a "fatura prevista" nunca é suprimida por elas.
+    if (existing.manuallyEdited) {
+      if (existing.paymentMethod !== paymentMethod) {
+        await prisma.bill.update({
+          where: { id: existing.id },
+          data: { paymentMethod },
+        });
+        result.billsUpdated++;
+      }
+      return;
+    }
     const changed =
       existing.amount !== data.amount ||
       existing.dueDate.getTime() !== data.dueDate.getTime() ||
