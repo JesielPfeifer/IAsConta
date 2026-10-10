@@ -544,10 +544,14 @@ export async function detectInternalTransfer(
   description: string
 ): Promise<boolean> {
   if (!TRANSFER_HINT_RE.test(description)) return false;
-  const pair = await prisma.transaction.findFirst({
+  const candidates = await prisma.transaction.findMany({
     where: internalTransferPairWhere(userId, accountId, type, amount, date) as any,
+    select: { description: true },
   });
-  return !!pair;
+  // A perna oposta também precisa ser "transfer-like": casar só pelo VALOR
+  // (ex.: uma compra no cartão de valor igual dias depois) não é
+  // transferência interna — marcar ocultaria uma compra real das listas.
+  return candidates.some((c) => TRANSFER_HINT_RE.test(c.description || ""));
 }
 
 
@@ -615,6 +619,50 @@ function internalTransferPairWhere(
   };
 }
 
+/** Nomes do titular + parceiro(a) (o "casal"): transferências com esses
+ * nomes são movimentações internas da casa — não contam como receita de
+ * quem recebe nem despesa de quem envia. */
+async function getHouseholdNames(userId: string): Promise<string[]> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { name: true, partnerId: true },
+  });
+  const names: string[] = [];
+  if (user?.name) names.push(user.name);
+  if (user?.partnerId) {
+    const partner = await prisma.user.findUnique({
+      where: { id: user.partnerId },
+      select: { name: true },
+    });
+    if (partner?.name) names.push(partner.name);
+  }
+  return names;
+}
+
+function normalizeName(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** true quando a descrição (transfer-like) menciona o nome do titular ou do
+ * parceiro(a) — ex.: "Transferência Recebida|NOME DO TITULAR". */
+function descriptionMentionsHousehold(description: string, names: string[]): boolean {
+  if (!TRANSFER_HINT_RE.test(description)) return false;
+  const d = normalizeName(description);
+  return names.some((n) => {
+    const norm = normalizeName(n);
+    if (!norm) return false;
+    if (d.includes(norm)) return true;
+    const tokens = norm.split(" ").filter((t) => t.length >= 4);
+    if (tokens.length === 0) return false;
+    return tokens.every((t) => d.includes(t));
+  });
+}
+
 async function syncBankAccount(
   client: ReturnType<typeof createPluggyClient>,
   account: PluggyAccount,
@@ -632,6 +680,8 @@ async function syncBankAccount(
     where: { userId, source: "PLUGGY" },
     select: { amount: true, dueDate: true },
   });
+
+  const householdNames = await getHouseholdNames(userId);
 
   for (const tx of transactions) {
     // PENDING purchases (open credit-card cycle / unconfirmed debit) are
@@ -668,14 +718,16 @@ async function syncBankAccount(
 
     const amount = resolveAmount(tx);
     const transferDate = new Date(tx.date);
-    const isInternalTransfer = await detectInternalTransfer(
-      userId,
-      account.id,
-      type,
-      amount,
-      transferDate,
-      tx.description
-    );
+    const isInternalTransfer =
+      descriptionMentionsHousehold(tx.description, householdNames) ||
+      (await detectInternalTransfer(
+        userId,
+        account.id,
+        type,
+        amount,
+        transferDate,
+        tx.description
+      ));
     // Revisão de salário: id da ÚNICA FixedIncome que diverge (null = ok).
     const salaryMismatch = await detectSalaryMismatch(
       userId,
@@ -687,7 +739,7 @@ async function syncBankAccount(
     // isInternalTransfer=false e continua aparecendo nos totais até o próximo
     // sync da outra conta.
     if (isInternalTransfer) {
-      await prisma.transaction.updateMany({
+      const legs = await prisma.transaction.findMany({
         where: internalTransferPairWhere(
           userId,
           account.id,
@@ -695,8 +747,17 @@ async function syncBankAccount(
           amount,
           transferDate
         ) as any,
-        data: { isInternalTransfer: true },
+        select: { id: true, description: true },
       });
+      const legIds = legs
+        .filter((l) => TRANSFER_HINT_RE.test(l.description || ""))
+        .map((l) => l.id);
+      if (legIds.length > 0) {
+        await prisma.transaction.updateMany({
+          where: { id: { in: legIds } },
+          data: { isInternalTransfer: true },
+        });
+      }
     }
 
     const data = {

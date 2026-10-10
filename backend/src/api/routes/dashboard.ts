@@ -101,7 +101,7 @@ function getMonthRange(month?: string): { start: Date; end: Date } {
  * para QUALQUER pessoa (HUSBAND/WIFE/COUPLE) e mantém /summary, /comparison,
  * /by-category, /by-payment, /year-analysis e /percentage coerentes entre si.
  */
-function isCountableTx<
+export function isCountableTx<
   T extends { source?: string | null; isCreditCard?: boolean | null }
 >(tx: T): boolean {
   return tx.source !== "PLUGGY" || !!tx.isCreditCard;
