@@ -748,6 +748,9 @@ router.get("/income-detail", async (req: Request, res: Response) => {
         type: "INCOME",
         date: { gte: start, lt: end },
         isHidden: false,
+        // Transferências entre contas próprias/do casal não são receita —
+        // mesma regra da lista de Transações.
+        isInternalTransfer: false,
       },
       orderBy: { date: "desc" },
     });
