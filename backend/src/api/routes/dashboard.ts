@@ -762,4 +762,109 @@ router.get("/income-detail", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/dashboard/ending-installments — prestações acabando em breve e
+// quanto cada término libera por mês (economia). Agrupa as séries de parcelas
+// (mesma chave do bot: installmentGroupId ou descrição+método).
+router.get("/ending-installments", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const horizonMonths = 4;
+    const horizon = new Date(now.getFullYear(), now.getMonth() + horizonMonths, 1);
+
+    const rows = await prisma.transaction.findMany({
+      where: {
+        userId: user.id,
+        totalInstallments: { gt: 1 },
+        isHidden: false,
+        isInternalTransfer: false,
+      },
+      select: {
+        description: true,
+        amount: true,
+        currentInstallment: true,
+        totalInstallments: true,
+        installmentGroupId: true,
+        paymentMethod: true,
+        isCreditCard: true,
+        date: true,
+      },
+      orderBy: { date: "asc" },
+    });
+
+    const groups = new Map<string, typeof rows>();
+    for (const tx of rows) {
+      const key = tx.installmentGroupId || `${tx.description}|${tx.paymentMethod}`;
+      const g = groups.get(key);
+      if (g) g.push(tx);
+      else groups.set(key, [tx]);
+    }
+
+    const endingSoon: Array<{
+      description: string;
+      paymentMethod: string | null;
+      isCreditCard: boolean | null;
+      currentInstallment: number;
+      totalInstallments: number;
+      monthlyAmount: number;
+      endsAt: Date;
+      remainingParcels: number;
+      remainingTotal: number;
+    }> = [];
+    const freedByMonth = new Map<string, number>();
+
+    for (const txs of groups.values()) {
+      const latest = txs.reduce((a, b) =>
+        b.currentInstallment > a.currentInstallment ? b : a
+      );
+      // Já terminou (última parcela cobrada)
+      if (latest.currentInstallment >= latest.totalInstallments) continue;
+      const remaining = latest.totalInstallments - latest.currentInstallment;
+      const lastParcel = txs.find((t) => t.currentInstallment === t.totalInstallments);
+      const endsAt = lastParcel
+        ? lastParcel.date
+        : new Date(
+            latest.date.getFullYear(),
+            latest.date.getMonth() + remaining,
+            latest.date.getDate()
+          );
+      // Só o que termina dentro do horizonte
+      if (endsAt < monthStart || endsAt >= horizon) continue;
+
+      const futureRows = txs.filter((t) => t.date >= monthStart && t.date <= endsAt);
+      const remainingTotal =
+        futureRows.length > 0
+          ? futureRows.reduce((sum, t) => sum + t.amount, 0)
+          : remaining * latest.amount;
+
+      endingSoon.push({
+        description: latest.description,
+        paymentMethod: latest.paymentMethod,
+        isCreditCard: latest.isCreditCard,
+        currentInstallment: latest.currentInstallment,
+        totalInstallments: latest.totalInstallments,
+        monthlyAmount: latest.amount,
+        endsAt,
+        remainingParcels: remaining,
+        remainingTotal,
+      });
+
+      const mk = `${endsAt.getFullYear()}-${String(endsAt.getMonth() + 1).padStart(2, "0")}`;
+      freedByMonth.set(mk, (freedByMonth.get(mk) || 0) + latest.amount);
+    }
+
+    endingSoon.sort((a, b) => a.endsAt.getTime() - b.endsAt.getTime());
+    const savings = Array.from(freedByMonth.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([month, freed]) => ({ month, freed }));
+    const totalMonthlyFreed = endingSoon.reduce((sum, g) => sum + g.monthlyAmount, 0);
+
+    res.json({ endingSoon, savings, totalMonthlyFreed, horizonMonths });
+  } catch (err) {
+    logger.error(err);
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
 export default router;
