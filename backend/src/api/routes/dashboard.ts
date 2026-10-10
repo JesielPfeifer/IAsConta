@@ -858,7 +858,12 @@ router.get("/ending-installments", async (req: Request, res: Response) => {
           : remaining * latest.amount;
 
       endingSoon.push({
-        description: latest.description,
+        // Nome limpo da série (sem " n/m" nem "(prev.)" — o card mostra a
+        // posição numa coluna própria).
+        description: latest.description
+          .replace(/\s*\(prev\.?\)\s*$/i, "")
+          .replace(/\s+\d{1,2}\s*\/\s*\d{1,2}\s*$/, "")
+          .trim(),
         paymentMethod: latest.paymentMethod,
         isCreditCard: latest.isCreditCard,
         currentInstallment: currentPos,
