@@ -6,20 +6,18 @@ const API_URL = import.meta.env.VITE_API_URL || '';
 export const DATA_CHANGED_EVENT = 'iasconta:data-changed';
 
 export async function api<T = any>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = localStorage.getItem('token');
   const isFormData = options.body instanceof FormData;
   const method = (options.method || 'GET').toUpperCase();
   const headers: Record<string, string> = {
     ...(!isFormData ? { 'Content-Type': 'application/json' } : {}),
     ...(options.headers as Record<string, string> || {}),
   };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
+  // Sessao via cookie httpOnly (JWT de 30 min, deslizante) — o navegador
+  // envia o cookie automaticamente em requisicoes same-origin.
+  const res = await fetch(`${API_URL}${path}`, { ...options, headers, credentials: 'same-origin' });
 
-  const res = await fetch(`${API_URL}${path}`, { ...options, headers });
-
-  if (res.status === 401 && token) {
-    localStorage.removeItem('token');
-    window.location.href = '/login';
+  if (res.status === 401 && !path.startsWith('/api/auth/login') && !path.startsWith('/api/auth/register')) {
+    if (window.location.pathname !== '/login') window.location.href = '/login';
     throw new Error('Sessao expirada');
   }
 

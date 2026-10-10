@@ -27,14 +27,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      setLoading(false);
-      return;
-    }
+    // Sessao via cookie httpOnly: o navegador reenvia o cookie automaticamente;
+    // sem sessao valida o /me responde 401 e o fluxo cai no login.
     api('/api/users/me')
       .then((data) => setUser(data.user || data))
-      .catch(() => localStorage.removeItem('token'))
+      .catch(() => { /* sem sessao */ })
       .finally(() => setLoading(false));
   }, []);
 
@@ -43,7 +40,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
-    localStorage.setItem('token', data.token);
     setUser(data.user);
     navigate('/');
   }, [navigate]);
@@ -53,15 +49,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       method: 'POST',
       body: JSON.stringify({ email, password, name, salary }),
     });
-    localStorage.setItem('token', data.token);
     setUser(data.user);
     navigate('/');
   }, [navigate]);
 
   const logout = useCallback(() => {
-    localStorage.removeItem('token');
+    // Encerra a sessao no servidor (limpa o cookie) e o estado local.
+    api('/api/auth/logout', { method: 'POST' }).catch(() => { /* ignore */ });
     setUser(null);
-  }, []);
+    navigate('/login');
+  }, [navigate]);
 
   const updateUser = useCallback((patch: Partial<User>) => {
     setUser((cur) => (cur ? { ...cur, ...patch } : cur));
