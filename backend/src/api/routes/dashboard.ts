@@ -762,6 +762,17 @@ router.get("/income-detail", async (req: Request, res: Response) => {
   }
 });
 
+/** Normaliza a descrição para a chave de SÉRIE de parcelas: remove o sufixo
+ * " n/m" e "(prev.)". Os installmentGroupId da Pluggy são POR PARCELA — a
+ * série real é (descrição normalizada + valor), como o sync usa. */
+function descNorm(s: string): string {
+  return (s || "")
+    .replace(/\s*\(prev\.?\)\s*$/i, "")
+    .replace(/\s+\d{1,2}\s*\/\s*\d{1,2}\s*$/, "")
+    .trim()
+    .toLowerCase();
+}
+
 // GET /api/dashboard/ending-installments — prestações acabando em breve e
 // quanto cada término libera por mês (economia). Agrupa as séries de parcelas
 // (mesma chave do bot: installmentGroupId ou descrição+método).
@@ -795,7 +806,7 @@ router.get("/ending-installments", async (req: Request, res: Response) => {
 
     const groups = new Map<string, typeof rows>();
     for (const tx of rows) {
-      const key = tx.installmentGroupId || `${tx.description}|${tx.paymentMethod}`;
+      const key = `${descNorm(tx.description)}|${Math.round(tx.amount * 100)}`;
       const g = groups.get(key);
       if (g) g.push(tx);
       else groups.set(key, [tx]);
@@ -818,19 +829,27 @@ router.get("/ending-installments", async (req: Request, res: Response) => {
       const latest = txs.reduce((a, b) =>
         b.currentInstallment > a.currentInstallment ? b : a
       );
-      // Já terminou (última parcela cobrada)
-      if (latest.currentInstallment >= latest.totalInstallments) continue;
-      const remaining = latest.totalInstallments - latest.currentInstallment;
+      // Última parcela da série (pode ser a projeção futura "(prev.)").
       const lastParcel = txs.find((t) => t.currentInstallment === t.totalInstallments);
+      const remainingToEnd = latest.totalInstallments - latest.currentInstallment;
       const endsAt = lastParcel
         ? lastParcel.date
         : new Date(
             latest.date.getFullYear(),
-            latest.date.getMonth() + remaining,
+            latest.date.getMonth() + remainingToEnd,
             latest.date.getDate()
           );
-      // Só o que termina dentro do horizonte
+      // Já terminou (última parcela no passado) ou termina depois do horizonte.
       if (endsAt < monthStart || endsAt >= horizon) continue;
+      // Posição atual = maior parcela JÁ COBRADA (data até hoje).
+      const charged = txs.filter((t) => t.date <= now);
+      const currentPos =
+        charged.length > 0
+          ? charged.reduce((a, b) =>
+              b.currentInstallment > a.currentInstallment ? b : a
+            ).currentInstallment
+          : 0;
+      const remaining = latest.totalInstallments - currentPos;
 
       const futureRows = txs.filter((t) => t.date >= monthStart && t.date <= endsAt);
       const remainingTotal =
@@ -842,7 +861,7 @@ router.get("/ending-installments", async (req: Request, res: Response) => {
         description: latest.description,
         paymentMethod: latest.paymentMethod,
         isCreditCard: latest.isCreditCard,
-        currentInstallment: latest.currentInstallment,
+        currentInstallment: currentPos,
         totalInstallments: latest.totalInstallments,
         monthlyAmount: latest.amount,
         endsAt,
