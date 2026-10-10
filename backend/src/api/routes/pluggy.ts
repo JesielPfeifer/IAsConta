@@ -48,11 +48,29 @@ router.get("/status", async (req: Request, res: Response) => {
     const settings = await prisma.userSettings.findUnique({ where: { userId: user.id } });
     const hasUserCreds = Boolean(settings?.pluggyClientId && settings?.pluggyClientSecret);
     const globalConfigured = Boolean(process.env.PLUGGY_CLIENT_ID && process.env.PLUGGY_CLIENT_SECRET);
+    // Estado do sync automático: lê os webhooks registrados na Pluggy (o
+    // botão "Ativar" é idempotente — aqui só reportamos o estado atual).
+    let autoSync: { registered: boolean; active: boolean; events: string[] } | null = null;
+    try {
+      const creds = await credsForUser(user.id);
+      if (creds) {
+        const client = createPluggyClient(creds);
+        const hooks = await client.listWebhooks();
+        autoSync = {
+          registered: hooks.length > 0,
+          active: hooks.some((w) => !w.disabledAt),
+          events: hooks.filter((w) => !w.disabledAt).map((w) => w.event),
+        };
+      }
+    } catch {
+      autoSync = null; // Pluggy indisponível não pode derrubar o status
+    }
     res.json({
       configured: hasUserCreds || globalConfigured,
       userConfigured: hasUserCreds,
       globalConfigured,
       webhookUrl: pluggyWebhookUrl(),
+      autoSync,
     });
   } catch (err) {
     console.error("[pluggy] status:", err);

@@ -66,6 +66,7 @@ export default function PluggySettingsCard() {
   const [syncMessage, setSyncMessage] = useState('');
   const [connecting, setConnecting] = useState(false);
   const [registeringWebhooks, setRegisteringWebhooks] = useState(false);
+  const [autoSync, setAutoSync] = useState<null | { registered: boolean; active: boolean; events: string[] }>(null);
   const [attachItemId, setAttachItemId] = useState('');
   const [attaching, setAttaching] = useState(false);
 
@@ -84,6 +85,7 @@ export default function PluggySettingsCard() {
       const status = await api('/api/pluggy/status');
       setUserConfigured(Boolean(status.userConfigured));
       setGlobalConfigured(Boolean(status.globalConfigured));
+      setAutoSync(status.autoSync ?? null);
       if (status.userConfigured) {
         const settings = await api('/api/settings');
         setClientId(settings.pluggyClientId || '');
@@ -260,6 +262,8 @@ export default function PluggySettingsCard() {
       );
       const okCount = result.results.filter((r) => r.id).length;
       setSyncMessage(`Webhooks registrados (${okCount}/${result.results.length}) — sync automático ativo.`);
+      const st = await api('/api/pluggy/status');
+      setAutoSync(st.autoSync ?? null);
     } catch (err: any) {
       setSyncMessage(`Erro ao registrar webhooks: ${err.message}`);
     } finally {
@@ -346,15 +350,46 @@ export default function PluggySettingsCard() {
                 {connecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
                 Conectar Novo Banco
               </button>
-              <button
-                onClick={handleRegisterWebhooks}
-                disabled={registeringWebhooks}
-                className="flex items-center gap-2 bg-white/[0.06] hover:bg-white/[0.1] disabled:opacity-40 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-all"
-              >
-                {registeringWebhooks ? <Loader2 className="w-4 h-4 animate-spin" /> : <Webhook className="w-4 h-4 text-emerald-400" />}
-                Ativar Sync Automático (Webhooks)
-              </button>
+              {autoSync?.active ? (
+                <>
+                  <span className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 px-4 py-2.5 rounded-xl text-sm font-medium">
+                    <CheckCircle2 className="w-4 h-4" /> Sync automático ativo
+                  </span>
+                  <button
+                    onClick={handleRegisterWebhooks}
+                    disabled={registeringWebhooks}
+                    title="Re-registrar os webhooks na Pluggy (idempotente)"
+                    className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 px-2 py-1 transition-colors"
+                  >
+                    {registeringWebhooks ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                    Re-registrar
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={handleRegisterWebhooks}
+                  disabled={registeringWebhooks}
+                  className={`flex items-center gap-2 disabled:opacity-40 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                    autoSync?.registered
+                      ? 'bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40'
+                      : 'bg-white/[0.06] hover:bg-white/[0.1]'
+                  }`}
+                >
+                  {registeringWebhooks ? <Loader2 className="w-4 h-4 animate-spin" /> : <Webhook className={`w-4 h-4 ${autoSync?.registered ? 'text-amber-400' : 'text-emerald-400'}`} />}
+                  Ativar Sync Automático (Webhooks)
+                </button>
+              )}
             </div>
+
+            {autoSync && (
+              <p className={`text-xs leading-relaxed ${autoSync.active ? 'text-emerald-400/80' : 'text-amber-400/90'}`}>
+                {autoSync.active
+                  ? `Sync automático ATIVO — eventos: ${autoSync.events.join(', ') || '—'}. O app sincroniza sozinho quando o banco publica novidades.`
+                  : autoSync.registered
+                    ? 'Sync automático com problema: webhook registrado mas DESABILITADO pela Pluggy — reative no botão acima.'
+                    : 'Sync automático INATIVO — sem webhooks registrados, o app só sincroniza manualmente (botão de atualizar de cada conexão).'}
+              </p>
+            )}
 
             <div className="bg-white/[0.02] border border-white/5 rounded-xl p-3 space-y-2">
               <p className="text-xs text-gray-500 leading-relaxed">
