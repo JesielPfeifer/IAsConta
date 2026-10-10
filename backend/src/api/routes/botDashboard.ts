@@ -308,7 +308,7 @@ router.get("/last-7-days", async (req: Request, res: Response) => {
     start.setDate(start.getDate() - 7);
     start.setHours(0, 0, 0, 0);
 
-    const transactions = await prisma.transaction.findMany({
+    const rawTransactions = await prisma.transaction.findMany({
       where: {
         userId: user.id,
         date: { gte: start, lte: end },
@@ -321,6 +321,10 @@ router.get("/last-7-days", async (req: Request, res: Response) => {
       include: { category: true },
       orderBy: { date: 'desc' },
     });
+
+    // Pares internos ainda não marcados pelo sync também saem da lista
+    // (mesma regra de runtime do dashboard web).
+    const transactions = filterInternalTransfers(rawTransactions);
 
     res.json(transactions.map(tx => ({
       date: tx.date.toISOString().split('T')[0],
