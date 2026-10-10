@@ -544,10 +544,14 @@ export async function detectInternalTransfer(
   description: string
 ): Promise<boolean> {
   if (!TRANSFER_HINT_RE.test(description)) return false;
-  const pair = await prisma.transaction.findFirst({
+  const candidates = await prisma.transaction.findMany({
     where: internalTransferPairWhere(userId, accountId, type, amount, date) as any,
+    select: { description: true },
   });
-  return !!pair;
+  // A perna oposta também precisa ser "transfer-like": casar só pelo VALOR
+  // (ex.: uma compra no cartão de valor igual dias depois) não é
+  // transferência interna — marcar ocultaria uma compra real das listas.
+  return candidates.some((c) => TRANSFER_HINT_RE.test(c.description || ""));
 }
 
 
@@ -687,7 +691,7 @@ async function syncBankAccount(
     // isInternalTransfer=false e continua aparecendo nos totais até o próximo
     // sync da outra conta.
     if (isInternalTransfer) {
-      await prisma.transaction.updateMany({
+      const legs = await prisma.transaction.findMany({
         where: internalTransferPairWhere(
           userId,
           account.id,
@@ -695,8 +699,17 @@ async function syncBankAccount(
           amount,
           transferDate
         ) as any,
-        data: { isInternalTransfer: true },
+        select: { id: true, description: true },
       });
+      const legIds = legs
+        .filter((l) => TRANSFER_HINT_RE.test(l.description || ""))
+        .map((l) => l.id);
+      if (legIds.length > 0) {
+        await prisma.transaction.updateMany({
+          where: { id: { in: legIds } },
+          data: { isInternalTransfer: true },
+        });
+      }
     }
 
     const data = {
