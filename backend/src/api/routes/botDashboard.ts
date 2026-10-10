@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { botAuthMiddleware } from "../middleware/botAuth.js";
+import { filterInternalTransfers, isCountableTx } from "./dashboard.js";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -51,12 +52,14 @@ router.get("/summary", async (req: Request, res: Response) => {
     const user = await getBotUser(req);
     const { start, end } = getCurrentMonthRange();
 
-    const [transactions, bills] = await Promise.all([
+    const [rawTransactions, bills] = await Promise.all([
       prisma.transaction.findMany({
         where: {
           userId: user.id,
           date: { gte: start, lt: end },
           billId: null,
+          isHidden: false,
+          isInternalTransfer: false,
         },
         include: { category: true },
       }),
@@ -67,6 +70,10 @@ router.get("/summary", async (req: Request, res: Response) => {
         },
       }),
     ]);
+
+    // Mesma regra única do dashboard web: transferências entre contas
+    // próprias e espelhos do banco (PLUGGY não-cartão) fora dos totais.
+    const transactions = filterInternalTransfers(rawTransactions).filter(isCountableTx);
 
     let totalIncome = 0;
     let totalExpense = 0;
@@ -156,13 +163,15 @@ router.get("/by-category", async (req: Request, res: Response) => {
     const user = await getBotUser(req);
     const { start, end } = getCurrentMonthRange();
 
-    const [transactions, bills] = await Promise.all([
+    const [rawTransactions, bills] = await Promise.all([
       prisma.transaction.findMany({
         where: {
           userId: user.id,
           type: "EXPENSE",
           date: { gte: start, lt: end },
           billId: null,
+          isHidden: false,
+          isInternalTransfer: false,
         },
         include: { category: true },
       }),
@@ -174,6 +183,9 @@ router.get("/by-category", async (req: Request, res: Response) => {
         include: { category: true },
       }),
     ]);
+
+    // Mesma regra única do dashboard web (ver /summary).
+    const transactions = filterInternalTransfers(rawTransactions).filter(isCountableTx);
 
     const byCategory: Record<string, number> = {};
 
@@ -210,13 +222,15 @@ router.get("/percentage", async (req: Request, res: Response) => {
     const user = await getBotUser(req);
     const { start, end } = getCurrentMonthRange();
 
-    const [transactions, bills] = await Promise.all([
+    const [rawTransactions, bills] = await Promise.all([
       prisma.transaction.findMany({
         where: {
           userId: user.id,
           type: "EXPENSE",
           date: { gte: start, lt: end },
           billId: null,
+          isHidden: false,
+          isInternalTransfer: false,
         },
       }),
       prisma.bill.findMany({
@@ -226,6 +240,8 @@ router.get("/percentage", async (req: Request, res: Response) => {
         },
       }),
     ]);
+
+    const transactions = filterInternalTransfers(rawTransactions).filter(isCountableTx);
 
     let husbandExpense = 0;
     let wifeExpense = 0;
@@ -296,6 +312,8 @@ router.get("/last-7-days", async (req: Request, res: Response) => {
       where: {
         userId: user.id,
         date: { gte: start, lte: end },
+        isHidden: false,
+        isInternalTransfer: false,
         // NOTE: this is an EXTRACT (list), not a sum — bill-linked card
         // purchases stay visible here (a user with only card purchases
         // would otherwise get an empty 7-day statement).
