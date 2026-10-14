@@ -190,6 +190,15 @@ function monthlyInstallmentAmount(tx: {
   return tx.totalInstallments > 1 ? tx.amount / tx.totalInstallments : tx.amount;
 }
 
+/** Soma meses com "clamp" no último dia do mês alvo (31/01 + 1 mês = 28/02). */
+function addMonthsClamped(date: Date, months: number): Date {
+  const targetMonth = date.getMonth() + months;
+  const targetYear = date.getFullYear() + Math.floor(targetMonth / 12);
+  const normalizedMonth = ((targetMonth % 12) + 12) % 12;
+  const lastDay = new Date(targetYear, normalizedMonth + 1, 0).getDate();
+  return new Date(targetYear, normalizedMonth, Math.min(date.getDate(), lastDay));
+}
+
 router.get("/summary", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
@@ -794,6 +803,7 @@ router.get("/ending-installments", async (req: Request, res: Response) => {
       select: {
         description: true,
         amount: true,
+        totalAmount: true,
         currentInstallment: true,
         totalInstallments: true,
         installmentGroupId: true,
@@ -834,11 +844,7 @@ router.get("/ending-installments", async (req: Request, res: Response) => {
       const remainingToEnd = latest.totalInstallments - latest.currentInstallment;
       const endsAt = lastParcel
         ? lastParcel.date
-        : new Date(
-            latest.date.getFullYear(),
-            latest.date.getMonth() + remainingToEnd,
-            latest.date.getDate()
-          );
+        : addMonthsClamped(latest.date, remainingToEnd);
       // Já terminou (última parcela no passado) ou termina depois do horizonte.
       if (endsAt < monthStart || endsAt >= horizon) continue;
       // Posição atual = maior parcela JÁ COBRADA (data até hoje).
@@ -850,12 +856,14 @@ router.get("/ending-installments", async (req: Request, res: Response) => {
             ).currentInstallment
           : 0;
       const remaining = latest.totalInstallments - currentPos;
+      // Última parcela já cobrada (posição == total): nada mais a pagar.
+      if (remaining <= 0) continue;
 
-      const futureRows = txs.filter((t) => t.date >= monthStart && t.date <= endsAt);
-      const remainingTotal =
-        futureRows.length > 0
-          ? futureRows.reduce((sum, t) => sum + t.amount, 0)
-          : remaining * latest.amount;
+      // Valor da PARCELA mensal (linha manual guarda a compra inteira em
+      // `amount`; a Pluggy guarda a parcela). Total restante = parcelas que
+      // faltam × parcela — cobre também parcelas futuras não gravadas.
+      const monthly = monthlyInstallmentAmount(latest);
+      const remainingTotal = remaining * monthly;
 
       endingSoon.push({
         // Nome limpo da série (sem " n/m" nem "(prev.)" — o card mostra a
@@ -868,14 +876,14 @@ router.get("/ending-installments", async (req: Request, res: Response) => {
         isCreditCard: latest.isCreditCard,
         currentInstallment: currentPos,
         totalInstallments: latest.totalInstallments,
-        monthlyAmount: latest.amount,
+        monthlyAmount: monthly,
         endsAt,
         remainingParcels: remaining,
         remainingTotal,
       });
 
       const mk = `${endsAt.getFullYear()}-${String(endsAt.getMonth() + 1).padStart(2, "0")}`;
-      freedByMonth.set(mk, (freedByMonth.get(mk) || 0) + latest.amount);
+      freedByMonth.set(mk, (freedByMonth.get(mk) || 0) + monthly);
     }
 
     endingSoon.sort((a, b) => a.endsAt.getTime() - b.endsAt.getTime());

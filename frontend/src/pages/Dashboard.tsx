@@ -98,6 +98,7 @@ export default function Dashboard() {
   const [bills, setBills] = useState<Bill[]>([]);
   const [incomeTx, setIncomeTx] = useState<any[]>([]);
   const [endingInst, setEndingInst] = useState<any>(null);
+  const [endingInstError, setEndingInstError] = useState(false);
   const [loadingExtras, setLoadingExtras] = useState(true);
   const [accountBanks, setAccountBanks] = useState<any[]>([]);
   const [accountTotal, setAccountTotal] = useState(0);
@@ -121,10 +122,15 @@ export default function Dashboard() {
   useEffect(() => {
     const loadExtras = async () => {
       try {
+        setEndingInstError(false);
         const [billsData, incomeData, endingData] = await Promise.all([
           api('/api/bills').catch(() => []),
           api(`/api/dashboard/income-detail?month=${encodeURIComponent(month)}`).catch(() => []),
-          api('/api/dashboard/ending-installments').catch(() => null),
+          api('/api/dashboard/ending-installments').catch(() => {
+            // Falha de requisição ≠ resposta vazia legítima (card mostra erro).
+            setEndingInstError(true);
+            return null;
+          }),
         ]);
         const mappedBills = Array.isArray(billsData)
           ? billsData.map((b: any) => ({ ...b, categoryName: b.category?.name || '-' }))
@@ -554,7 +560,9 @@ export default function Dashboard() {
         icon={<CalendarClock className="h-5 w-5 text-purple-400" />}
         iconBg="bg-purple-500/10"
       >
-        {endingInst && (endingInst.endingSoon?.length ?? 0) > 0 ? (
+        {endingInstError ? (
+          <EmptyState icon={<CalendarClock className="h-8 w-8 text-red-400/70" />} text="Não foi possível carregar as prestações — tente novamente" />
+        ) : endingInst && (endingInst.endingSoon?.length ?? 0) > 0 ? (
           <div>
             <table className="w-full text-sm">
               <thead>
