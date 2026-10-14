@@ -1,13 +1,22 @@
 import { useState, useEffect } from 'react';
 import { useDashboard } from '../hooks/useDashboard';
 import { useTransactions } from '../hooks/useTransactions';
-import { ArrowUpRight, ArrowDownRight, Wallet, PieChart, BarChart3, Clock, CheckSquare, CreditCard, Lightbulb, Calendar, TrendingUp, TrendingDown, DollarSign, Receipt, X, Landmark } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, Wallet, PieChart, BarChart3, Clock, CheckSquare, CreditCard, Lightbulb, Calendar, TrendingUp, TrendingDown, DollarSign, Receipt, X, Landmark, CalendarClock } from 'lucide-react';
 import { PieChart as RePie, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import dayjs from 'dayjs';
 import { api } from '../api/client';
 import { useOnboarding } from '../hooks/useOnboarding';
 
 const COLORS = ['#10b981', '#14b8a6', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#f97316', '#ef4444', '#84cc16', '#a855f7', '#14b8a6', '#e11d48'];
+
+const MES_ABREV: Record<string, string> = {
+  '01': 'Jan', '02': 'Fev', '03': 'Mar', '04': 'Abr', '05': 'Mai', '06': 'Jun',
+  '07': 'Jul', '08': 'Ago', '09': 'Set', '10': 'Out', '11': 'Nov', '12': 'Dez',
+};
+function monthLabel(m: string): string {
+  const [y, mo] = m.split('-');
+  return `${MES_ABREV[mo] || mo}/${y.slice(2)}`;
+}
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
@@ -88,6 +97,7 @@ export default function Dashboard() {
   
   const [bills, setBills] = useState<Bill[]>([]);
   const [incomeTx, setIncomeTx] = useState<any[]>([]);
+  const [endingInst, setEndingInst] = useState<any>(null);
   const [loadingExtras, setLoadingExtras] = useState(true);
   const [accountBanks, setAccountBanks] = useState<any[]>([]);
   const [accountTotal, setAccountTotal] = useState(0);
@@ -111,15 +121,17 @@ export default function Dashboard() {
   useEffect(() => {
     const loadExtras = async () => {
       try {
-        const [billsData, incomeData] = await Promise.all([
+        const [billsData, incomeData, endingData] = await Promise.all([
           api('/api/bills').catch(() => []),
           api(`/api/dashboard/income-detail?month=${encodeURIComponent(month)}`).catch(() => []),
+          api('/api/dashboard/ending-installments').catch(() => null),
         ]);
         const mappedBills = Array.isArray(billsData)
           ? billsData.map((b: any) => ({ ...b, categoryName: b.category?.name || '-' }))
           : [];
         setBills(mappedBills);
         setIncomeTx(Array.isArray(incomeData) ? incomeData : []);
+        setEndingInst(endingData);
       } catch {
         // silent
       } finally {
@@ -534,6 +546,54 @@ export default function Dashboard() {
           )}
         </SectionCard>
       </div>
+
+      {/* Prestações acabando */}
+      <SectionCard
+        title="Prestações acabando"
+        subtitle="Parcelas que terminam em breve e a economia mensal"
+        icon={<CalendarClock className="h-5 w-5 text-purple-400" />}
+        iconBg="bg-purple-500/10"
+      >
+        {endingInst && (endingInst.endingSoon?.length ?? 0) > 0 ? (
+          <div>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wider text-gray-500 border-b border-white/5">
+                  <th className="pb-3 font-medium">Descrição</th>
+                  <th className="pb-3 font-medium">Parcela</th>
+                  <th className="pb-3 font-medium">Valor/mês</th>
+                  <th className="pb-3 text-right font-medium">Termina em</th>
+                </tr>
+              </thead>
+              <tbody>
+                {endingInst.endingSoon.map((g: any, i: number) => (
+                  <tr key={i} className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors">
+                    <td className="py-3 font-medium text-white max-w-[220px] truncate">{g.description}</td>
+                    <td className="py-3 text-gray-400">{g.currentInstallment}/{g.totalInstallments}</td>
+                    <td className="py-3 text-gray-300 tabular-nums">{formatCurrency(g.monthlyAmount)}</td>
+                    <td className="py-3 text-right text-gray-400">{dayjs(g.endsAt).format('MM/YYYY')}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-white/5">
+                  <td colSpan={2} className="py-3 text-sm font-medium text-gray-300">Economia quando terminarem</td>
+                  <td colSpan={2} className="py-3 text-right font-bold text-emerald-400">
+                    +{formatCurrency(endingInst.totalMonthlyFreed)}/mês
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+            {endingInst.savings?.length > 0 && (
+              <p className="text-xs text-gray-500 mt-3">
+                {endingInst.savings.map((sv: any) => `${monthLabel(sv.month)}: +${formatCurrency(sv.freed)}/mês`).join(' · ')}
+              </p>
+            )}
+          </div>
+        ) : (
+          <EmptyState icon={<CalendarClock className="h-8 w-8 text-gray-700" />} text="Nenhuma prestação terminando nos próximos meses" />
+        )}
+      </SectionCard>
 
       {/* Gastos por Meio de Pagamento */}
       <SectionCard
