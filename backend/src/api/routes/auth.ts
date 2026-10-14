@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { PrismaClient } from "@prisma/client";
-import { authMiddleware } from "../middleware/auth.js";
+import { authMiddleware, setSessionCookie, clearSessionCookie } from "../middleware/auth.js";
 import { sendPasswordReset, sendPartnerInvite } from "../services/email.js";
 
 import { checkAccountLock, recordFailedAttempt, resetFailedAttempts } from "../middleware/security.js";
@@ -61,7 +61,7 @@ function generateToken(user: {
       partnerId: user.partnerId,
     },
     JWT_SECRET,
-    { expiresIn: "7d" }
+    { expiresIn: "30m" }
   );
 }
 
@@ -165,6 +165,7 @@ router.post("/register", async (req: Request, res: Response) => {
       partnerId: user.partnerId,
     });
 
+    setSessionCookie(req, res, token);
     res.status(201).json({ token, user: { id: user.id, email: user.email, name: user.name, salary: user.salary, partnerId: user.partnerId } });
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -217,6 +218,7 @@ router.post("/login", async (req: Request, res: Response) => {
       partnerId: user.partnerId,
     });
 
+    setSessionCookie(req, res, token);
     res.json({ token, user: { id: user.id, email: user.email, name: user.name, salary: user.salary, partnerId: user.partnerId } });
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -226,6 +228,12 @@ router.post("/login", async (req: Request, res: Response) => {
     console.error(err);
     res.status(500).json({ error: "Erro interno" });
   }
+});
+
+// POST /api/auth/logout — encerra a sessão web (limpa o cookie httpOnly).
+router.post("/logout", (_req: Request, res: Response) => {
+  clearSessionCookie(res);
+  res.json({ ok: true });
 });
 
 router.post("/forgot-password", async (req: Request, res: Response) => {

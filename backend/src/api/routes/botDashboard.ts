@@ -344,6 +344,26 @@ router.get("/last-7-days", async (req: Request, res: Response) => {
 // GET /api/bot/dashboard/financial-health — couple's financial health:
 // fixed monthly income, current month commitments, NEXT month forecast,
 // and installments/faturas ending within the next 3 months.
+/** Chave de SÉRIE de parcelas: descrição normalizada (sem " n/m"/(prev.)) +
+ * valor — os installmentGroupId da Pluggy são por parcela, não por série. */
+function seriesKey(description: string, amount: number): string {
+  const norm = (description || "")
+    .replace(/\s*\(prev\.?\)\s*$/i, "")
+    .replace(/\s+\d{1,2}\s*\/\s*\d{1,2}\s*$/, "")
+    .trim()
+    .toLowerCase();
+  return `${norm}|${Math.round(amount * 100)}`;
+}
+
+/** Soma meses com "clamp" no último dia do mês alvo (31/01 + 1 mês = 28/02). */
+function addMonthsClamped(date: Date, months: number): Date {
+  const targetMonth = date.getMonth() + months;
+  const targetYear = date.getFullYear() + Math.floor(targetMonth / 12);
+  const normalizedMonth = ((targetMonth % 12) + 12) % 12;
+  const lastDay = new Date(targetYear, normalizedMonth + 1, 0).getDate();
+  return new Date(targetYear, normalizedMonth, Math.min(date.getDate(), lastDay));
+}
+
 router.get("/financial-health", async (req: Request, res: Response) => {
   try {
     const user = await getBotUser(req);
@@ -422,7 +442,7 @@ router.get("/financial-health", async (req: Request, res: Response) => {
     // 1/2 row as "open".
     const groups = new Map<string, (typeof installments)[number][]>();
     for (const tx of installments) {
-      const key = tx.installmentGroupId || `${tx.description}|${tx.paymentMethod}`;
+      const key = seriesKey(tx.description, tx.amount);
       const g = groups.get(key);
       if (g) g.push(tx);
       else groups.set(key, [tx]);
@@ -447,11 +467,7 @@ router.get("/financial-health", async (req: Request, res: Response) => {
         );
         const endsAt = lastParcel
           ? lastParcel.date
-          : new Date(
-              latest.date.getFullYear(),
-              latest.date.getMonth() + remaining,
-              latest.date.getDate()
-            );
+          : addMonthsClamped(latest.date, remaining);
         // Parcels due within the 3-month horizon (future parcels in DB)
         const horizonParcels = txs.filter(
           (t) => t.date >= end && t.date < horizon3

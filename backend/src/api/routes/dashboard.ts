@@ -190,6 +190,15 @@ function monthlyInstallmentAmount(tx: {
   return tx.totalInstallments > 1 ? tx.amount / tx.totalInstallments : tx.amount;
 }
 
+/** Soma meses com "clamp" no último dia do mês alvo (31/01 + 1 mês = 28/02). */
+function addMonthsClamped(date: Date, months: number): Date {
+  const targetMonth = date.getMonth() + months;
+  const targetYear = date.getFullYear() + Math.floor(targetMonth / 12);
+  const normalizedMonth = ((targetMonth % 12) + 12) % 12;
+  const lastDay = new Date(targetYear, normalizedMonth + 1, 0).getDate();
+  return new Date(targetYear, normalizedMonth, Math.min(date.getDate(), lastDay));
+}
+
 router.get("/summary", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
@@ -756,6 +765,134 @@ router.get("/income-detail", async (req: Request, res: Response) => {
     });
 
     res.json(transactions);
+  } catch (err) {
+    logger.error(err);
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+/** Normaliza a descrição para a chave de SÉRIE de parcelas: remove o sufixo
+ * " n/m" e "(prev.)". Os installmentGroupId da Pluggy são POR PARCELA — a
+ * série real é (descrição normalizada + valor), como o sync usa. */
+function descNorm(s: string): string {
+  return (s || "")
+    .replace(/\s*\(prev\.?\)\s*$/i, "")
+    .replace(/\s+\d{1,2}\s*\/\s*\d{1,2}\s*$/, "")
+    .trim()
+    .toLowerCase();
+}
+
+// GET /api/dashboard/ending-installments — prestações acabando em breve e
+// quanto cada término libera por mês (economia). Agrupa as séries de parcelas
+// (mesma chave do bot: installmentGroupId ou descrição+método).
+router.get("/ending-installments", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const horizonMonths = 4;
+    const horizon = new Date(now.getFullYear(), now.getMonth() + horizonMonths, 1);
+
+    const rows = await prisma.transaction.findMany({
+      where: {
+        userId: user.id,
+        totalInstallments: { gt: 1 },
+        isHidden: false,
+        isInternalTransfer: false,
+      },
+      select: {
+        description: true,
+        amount: true,
+        totalAmount: true,
+        currentInstallment: true,
+        totalInstallments: true,
+        installmentGroupId: true,
+        paymentMethod: true,
+        isCreditCard: true,
+        date: true,
+      },
+      orderBy: { date: "asc" },
+    });
+
+    const groups = new Map<string, typeof rows>();
+    for (const tx of rows) {
+      const key = `${descNorm(tx.description)}|${Math.round(tx.amount * 100)}`;
+      const g = groups.get(key);
+      if (g) g.push(tx);
+      else groups.set(key, [tx]);
+    }
+
+    const endingSoon: Array<{
+      description: string;
+      paymentMethod: string | null;
+      isCreditCard: boolean | null;
+      currentInstallment: number;
+      totalInstallments: number;
+      monthlyAmount: number;
+      endsAt: Date;
+      remainingParcels: number;
+      remainingTotal: number;
+    }> = [];
+    const freedByMonth = new Map<string, number>();
+
+    for (const txs of groups.values()) {
+      const latest = txs.reduce((a, b) =>
+        b.currentInstallment > a.currentInstallment ? b : a
+      );
+      // Última parcela da série (pode ser a projeção futura "(prev.)").
+      const lastParcel = txs.find((t) => t.currentInstallment === t.totalInstallments);
+      const remainingToEnd = latest.totalInstallments - latest.currentInstallment;
+      const endsAt = lastParcel
+        ? lastParcel.date
+        : addMonthsClamped(latest.date, remainingToEnd);
+      // Já terminou (última parcela no passado) ou termina depois do horizonte.
+      if (endsAt < monthStart || endsAt >= horizon) continue;
+      // Posição atual = maior parcela JÁ COBRADA (data até hoje).
+      const charged = txs.filter((t) => t.date <= now);
+      const currentPos =
+        charged.length > 0
+          ? charged.reduce((a, b) =>
+              b.currentInstallment > a.currentInstallment ? b : a
+            ).currentInstallment
+          : 0;
+      const remaining = latest.totalInstallments - currentPos;
+      // Última parcela já cobrada (posição == total): nada mais a pagar.
+      if (remaining <= 0) continue;
+
+      // Valor da PARCELA mensal (linha manual guarda a compra inteira em
+      // `amount`; a Pluggy guarda a parcela). Total restante = parcelas que
+      // faltam × parcela — cobre também parcelas futuras não gravadas.
+      const monthly = monthlyInstallmentAmount(latest);
+      const remainingTotal = remaining * monthly;
+
+      endingSoon.push({
+        // Nome limpo da série (sem " n/m" nem "(prev.)" — o card mostra a
+        // posição numa coluna própria).
+        description: latest.description
+          .replace(/\s*\(prev\.?\)\s*$/i, "")
+          .replace(/\s+\d{1,2}\s*\/\s*\d{1,2}\s*$/, "")
+          .trim(),
+        paymentMethod: latest.paymentMethod,
+        isCreditCard: latest.isCreditCard,
+        currentInstallment: currentPos,
+        totalInstallments: latest.totalInstallments,
+        monthlyAmount: monthly,
+        endsAt,
+        remainingParcels: remaining,
+        remainingTotal,
+      });
+
+      const mk = `${endsAt.getFullYear()}-${String(endsAt.getMonth() + 1).padStart(2, "0")}`;
+      freedByMonth.set(mk, (freedByMonth.get(mk) || 0) + monthly);
+    }
+
+    endingSoon.sort((a, b) => a.endsAt.getTime() - b.endsAt.getTime());
+    const savings = Array.from(freedByMonth.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([month, freed]) => ({ month, freed }));
+    const totalMonthlyFreed = endingSoon.reduce((sum, g) => sum + g.monthlyAmount, 0);
+
+    res.json({ endingSoon, savings, totalMonthlyFreed, horizonMonths });
   } catch (err) {
     logger.error(err);
     res.status(500).json({ error: "Erro interno" });
