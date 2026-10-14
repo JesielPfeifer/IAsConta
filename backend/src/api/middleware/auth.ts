@@ -1,5 +1,8 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { PrismaClient } from "@prisma/client";
+
+const prisma = new PrismaClient();
 
 declare global {
   namespace Express {
@@ -53,7 +56,7 @@ function readCookie(req: Request, name: string): string | null {
   return null;
 }
 
-export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
+export async function authMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
   const header = req.headers.authorization;
   const bearer = header && header.startsWith("Bearer ") ? header.slice(7) : null;
   const cookieToken = readCookie(req, SESSION_COOKIE);
@@ -73,27 +76,34 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
       partnerId: string | null;
     };
 
-    req.user = {
-      id: payload.id,
-      email: payload.email,
-      name: payload.name,
-      salary: payload.salary,
-      partnerId: payload.partnerId,
-    };
-
-    // Sessão web deslizante: renova o cookie a cada requisição autenticada
-    // (expira após 30 minutos de inatividade). Bearer (bots/scripts) não altera.
-    if (!bearer && cookieToken) {
-      const claims = {
+    // Bearer (bots/scripts): usa os claims do próprio token, sem tocar o cookie.
+    if (bearer || !cookieToken) {
+      req.user = {
         id: payload.id,
         email: payload.email,
         name: payload.name,
         salary: payload.salary,
         partnerId: payload.partnerId,
       };
-      setSessionCookie(req, res, jwt.sign(claims, JWT_SECRET, { expiresIn: SESSION_TTL }));
+      next();
+      return;
     }
 
+    // Sessão web (cookie httpOnly, deslizante): recarrega o estado ATUAL do
+    // usuário antes de renovar — o token deslizante não pode eternizar claims
+    // antigos (ex.: partnerId desatualizado após convite/parceria aceita).
+    const fresh = await prisma.user.findUnique({
+      where: { id: payload.id },
+      select: { id: true, email: true, name: true, salary: true, partnerId: true },
+    });
+    if (!fresh) {
+      clearSessionCookie(res);
+      res.status(401).json({ error: "Sessão inválida" });
+      return;
+    }
+
+    req.user = fresh;
+    setSessionCookie(req, res, jwt.sign({ ...fresh }, JWT_SECRET, { expiresIn: SESSION_TTL }));
     next();
   } catch {
     res.status(401).json({ error: "Token inválido ou expirado" });

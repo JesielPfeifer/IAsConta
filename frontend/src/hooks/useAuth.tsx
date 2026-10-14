@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 
@@ -15,7 +15,7 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name: string, salary?: number) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   updateUser: (patch: Partial<User>) => void;
 }
 
@@ -25,14 +25,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  // Um login/registro pode acontecer enquanto a sondagem inicial de /me ainda
+  // está no ar; a resposta atrasada dela não pode sobrescrever o usuário novo
+  // nem derrubar a navegação para /login.
+  const authChangedRef = useRef(false);
 
   useEffect(() => {
+    let cancelled = false;
     // Sessao via cookie httpOnly: o navegador reenvia o cookie automaticamente;
-    // sem sessao valida o /me responde 401 e o fluxo cai no login.
-    api('/api/users/me')
-      .then((data) => setUser(data.user || data))
+    // sem sessao valida o /me responde 401 (sem redirect global — o
+    // ProtectedRoute cuida da navegacao) e o fluxo cai no login.
+    api('/api/users/me', { skipAuthRedirect: true })
+      .then((data) => {
+        if (!cancelled && !authChangedRef.current) setUser(data.user || data);
+      })
       .catch(() => { /* sem sessao */ })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
@@ -40,6 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
+    authChangedRef.current = true;
     setUser(data.user);
     navigate('/');
   }, [navigate]);
@@ -49,13 +59,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       method: 'POST',
       body: JSON.stringify({ email, password, name, salary }),
     });
+    authChangedRef.current = true;
     setUser(data.user);
     navigate('/');
   }, [navigate]);
 
-  const logout = useCallback(() => {
-    // Encerra a sessao no servidor (limpa o cookie) e o estado local.
-    api('/api/auth/logout', { method: 'POST' }).catch(() => { /* ignore */ });
+  const logout = useCallback(async () => {
+    // Encerra a sessao no servidor PRIMEIRO (limpa o cookie httpOnly). Se o
+    // POST falhar, o cookie continua valido no navegador — manter o estado
+    // local e propagar o erro evita um "logout" apenas de fachada.
+    await api('/api/auth/logout', { method: 'POST' });
+    authChangedRef.current = true;
     setUser(null);
     navigate('/login');
   }, [navigate]);

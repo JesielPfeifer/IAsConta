@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { Outlet, NavLink } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { LayoutDashboard, ArrowLeftRight, Calendar, Settings, LogOut, Wallet, Wallet2, Target, TrendingUp, BarChart3, Menu, X, ArrowDownLeft, HelpCircle } from 'lucide-react';
 import ChatBot from './ChatBot';
@@ -42,12 +42,14 @@ function Brand({ compact = false }: { compact?: boolean }) {
 
 export default function Layout() {
   const { user, logout } = useAuth();
-  const navigate = useNavigate();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  function handleLogout() {
-    logout();
-    navigate('/login');
+  async function handleLogout() {
+    try {
+      await logout();
+    } catch {
+      alert('Não foi possível encerrar a sessão. Tente novamente.');
+    }
   }
 
   const navLinks = (onNavigate?: () => void) =>
