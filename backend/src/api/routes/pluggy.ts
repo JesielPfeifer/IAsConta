@@ -577,14 +577,18 @@ router.post("/webhook", async (req: Request, res: Response) => {
   const body = (req.body || {}) as Record<string, unknown>;
   console.log("[pluggy-webhook] evento:", body.event || body.eventName, "item:", body.itemId);
 
-  try {
-    const summary = await handlePluggyWebhook(body);
-    if (summary) console.log("[pluggy-webhook]", summary);
-    res.sendStatus(200);
-  } catch (err) {
-    console.error("[pluggy-webhook] erro:", err);
-    res.sendStatus(200); // always ack to avoid Pluggy retry storms
-  }
+  // Responder ANTES de processar: a Pluggy corta a conexão em 10s e trata a
+  // entrega como falha (com até 3 retentativas) quando o 2XX demora. O sync
+  // do item leva ~10s — os docs da Pluggy exigem "retorne 2XX logo após
+  // receber e processe depois". O processamento segue em background.
+  res.sendStatus(200);
+  handlePluggyWebhook(body)
+    .then((summary) => {
+      if (summary) console.log("[pluggy-webhook]", summary);
+    })
+    .catch((err) => {
+      console.error("[pluggy-webhook] erro:", err);
+    });
 });
 
 /** Constant-time string comparison (no length short-circuit). */
