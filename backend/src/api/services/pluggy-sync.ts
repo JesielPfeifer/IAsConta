@@ -259,7 +259,10 @@ function normalizePaymentMethod(account: PluggyAccount, connectorName?: string |
       .replace(/\s+/g, " ")
       .trim();
     const name = cleaned.replace(/\s+/g, "_");
-    if (name) return name;
+    // Sobrou só o prefixo do produto ("CARTAO_EMPRESARIAL"): continua genérico
+    // — devolve CARTAO para o chamador resolver o banco (itemBankName) em vez
+    // de exibir o rótulo cru no título da fatura.
+    if (name && !name.startsWith("CARTAO")) return name;
     return "CARTAO";
   }
   if (connectorName) {
