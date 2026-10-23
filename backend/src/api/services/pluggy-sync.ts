@@ -1318,15 +1318,21 @@ async function upsertBill(
   const isPaid = bill.totalAmount <= 0 || paymentsTotal >= bill.totalAmount + financeTotal;
 
   const due = new Date(bill.dueDate);
-  const cardName = account.marketingName || account.name || "Cartão de Crédito";
+  // Mesmo método normalizado das transações — o front usa para esconder a
+  // fatura prevista quando a oficial do mês já existe.
+  const paymentMethod = cardPaymentMethod(account, connectorName, itemBankName);
+  // Título da fatura: em itens do MeuPluggy o `account.name` carrega o produto
+  // do cartão ("platinum", "gold", "black"...) em vez do banco. Usa o nome
+  // resolvido do banco (o mesmo do paymentMethod) para o título não exibir o
+  // rótulo do produto.
+  const cardName =
+    paymentMethod !== "CARTAO"
+      ? paymentMethod.replace(/_/g, " ")
+      : account.marketingName || account.name || "Cartão de Crédito";
   const name = `Fatura ${cardName} — ${due.toLocaleDateString("pt-BR", {
     month: "short",
     year: "numeric",
   })}`;
-
-  // Mesmo método normalizado das transações — o front usa para esconder a
-  // fatura prevista quando a oficial do mês já existe.
-  const paymentMethod = cardPaymentMethod(account, connectorName, itemBankName);
 
   const data = {
     name,
