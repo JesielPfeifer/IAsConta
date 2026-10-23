@@ -176,6 +176,12 @@ export default function Dashboard() {
   const totalIncome = summary?.totalIncome ?? 0;
   const totalExpense = summary?.totalExpense ?? 0;
   const balance = summary?.balance ?? 0;
+  // Composicao da despesa: contas/faturas com vencimento no mes x compras de
+  // cartao pela data da compra (que so caem na fatura seguinte) x outros
+  // lancamentos. O total nao muda — o hint explica o que ja foi cobrado.
+  const billsTotal = summary?.billsTotal ?? 0;
+  const cardNextInvoice = summary?.creditCardExpense ?? 0;
+  const expenseOthers = Math.max(0, totalExpense - billsTotal - cardNextInvoice);
 
   const pieData = byCategory.map((c) => ({ name: c.category, value: Math.abs(c.total) }));
   const byPaymentData = byPayment.map((p) => ({ method: p.method, total: p.total }));
@@ -223,6 +229,7 @@ export default function Dashboard() {
         <SummaryCard
           label="Despesas"
           value={formatCurrency(totalExpense)}
+          hint={`Contas/faturas ${formatCurrency(billsTotal)} · Cartão próx. fatura ${formatCurrency(cardNextInvoice)}${expenseOthers > 0.005 ? ` · Outros ${formatCurrency(expenseOthers)}` : ''}`}
           icon={<ArrowDownRight className="h-5 w-5 text-red-400" />}
           color="text-red-400"
           bgIcon="bg-red-500/10"
@@ -688,7 +695,7 @@ export default function Dashboard() {
 
 // --- Subcomponents ---
 
-function SummaryCard({ label, value, icon, color, bgIcon }: { label: string; value: string; icon: React.ReactNode; color: string; bgIcon: string }) {
+function SummaryCard({ label, value, icon, color, bgIcon, hint }: { label: string; value: string; icon: React.ReactNode; color: string; bgIcon: string; hint?: string }) {
   return (
     <div className="group relative overflow-hidden rounded-2xl border border-white/5 bg-gray-900 p-5 transition-transform duration-200 hover:scale-[1.02]">
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/[0.02] to-transparent" />
@@ -696,6 +703,7 @@ function SummaryCard({ label, value, icon, color, bgIcon }: { label: string; val
         <div className="space-y-1.5">
           <p className="text-xs font-medium text-gray-400">{label}</p>
           <p className={`text-2xl font-bold tracking-tight ${color}`}>{value}</p>
+          {hint && <p className="text-[11px] leading-snug text-gray-500">{hint}</p>}
         </div>
         <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${bgIcon}`}>
           {icon}

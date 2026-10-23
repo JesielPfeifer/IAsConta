@@ -7,6 +7,7 @@ interface Summary {
   totalExpense: number;
   balance: number;
   billsTotal: number;
+  creditCardExpense: number;
   byPerson: {
     husband: { income: number; expense: number };
     wife: { income: number; expense: number };
