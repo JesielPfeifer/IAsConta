@@ -176,12 +176,11 @@ export default function Dashboard() {
   const totalIncome = summary?.totalIncome ?? 0;
   const totalExpense = summary?.totalExpense ?? 0;
   const balance = summary?.balance ?? 0;
-  // Composicao da despesa: contas/faturas com vencimento no mes x compras de
-  // cartao pela data da compra (que so caem na fatura seguinte) x outros
-  // lancamentos. O total nao muda — o hint explica o que ja foi cobrado.
+  // Composicao da despesa no mes vigente: contas/faturas com vencimento no mes
+  // x lancamentos fora das contas. O cartao entra dentro das faturas (Bill) —
+  // nao e somado individualmente.
   const billsTotal = summary?.billsTotal ?? 0;
-  const cardNextInvoice = summary?.creditCardExpense ?? 0;
-  const expenseOthers = Math.max(0, totalExpense - billsTotal - cardNextInvoice);
+  const expenseOthers = Math.max(0, totalExpense - billsTotal);
 
   const pieData = byCategory.map((c) => ({ name: c.category, value: Math.abs(c.total) }));
   const byPaymentData = byPayment.map((p) => ({ method: p.method, total: p.total }));
@@ -229,7 +228,7 @@ export default function Dashboard() {
         <SummaryCard
           label="Despesas"
           value={formatCurrency(totalExpense)}
-          hint={`Contas/faturas ${formatCurrency(billsTotal)} · Cartão próx. fatura ${formatCurrency(cardNextInvoice)}${expenseOthers > 0.005 ? ` · Outros ${formatCurrency(expenseOthers)}` : ''}`}
+          hint={`Contas/faturas ${formatCurrency(billsTotal)}${expenseOthers > 0.005 ? ` · Outros ${formatCurrency(expenseOthers)}` : ''}`}
           icon={<ArrowDownRight className="h-5 w-5 text-red-400" />}
           color="text-red-400"
           bgIcon="bg-red-500/10"

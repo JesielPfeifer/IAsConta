@@ -94,6 +94,45 @@ function getMonthRange(month?: string): { start: Date; end: Date } {
   return { start, end };
 }
 
+/** Chave "YYYY-MM" do mês filtrado (mesma normalização do getMonthRange). */
+function getMonthKey(month?: string): string {
+  const { start } = getMonthRange(month);
+  return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/**
+ * Filtro do "mês vigente" para as transações do dashboard — a mesma regra de
+ * /api/transactions: compras de cartão pela FATURA (billForecastMonth),
+ * competência explícita (referenceMonth) vence e, no resto, o mês civil da
+ * data. O cartão não é somado individualmente nos totais: ele entra pela
+ * fatura (Bill) do mês em que vence.
+ */
+function monthTransactionsWhere(
+  userId: string,
+  monthKey: string,
+  start: Date,
+  end: Date
+) {
+  return {
+    userId,
+    billId: null,
+    isHidden: false,
+    AND: [
+      {
+        OR: [
+          { isCreditCard: true, billForecastMonth: monthKey },
+          { referenceMonth: monthKey },
+          {
+            billForecastMonth: null,
+            referenceMonth: null,
+            date: { gte: start, lt: end },
+          },
+        ],
+      },
+    ],
+  };
+}
+
 /**
  * Regra única dos totais do dashboard: transações importadas do Pluggy que
  * NÃO são de cartão de crédito (PIX, TED, débito em conta) não entram em
@@ -202,18 +241,16 @@ function addMonthsClamped(date: Date, months: number): Date {
 router.get("/summary", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
+    const monthKey = getMonthKey(req.query.month as string);
     const { start, end } = getMonthRange(req.query.month as string);
 
     const [rawTransactions, bills] = await Promise.all([
+      // Mês vigente (mesma regra de /api/transactions): compras de cartão vêm
+      // pela fatura (billForecastMonth), referenceMonth explícito vence e o
+      // resto segue o mês civil da data. Transações vinculadas a uma fatura
+      // (billId) ficam de fora: o Bill correspondente já conta a despesa.
       prisma.transaction.findMany({
-        where: {
-          userId: user.id,
-          date: { gte: start, lt: end },
-          isHidden: false,
-          // Transactions linked to a credit card fatura are excluded: the
-          // corresponding Bill row already counts that expense once.
-          billId: null,
-        },
+        where: monthTransactionsWhere(user.id, monthKey, start, end),
         include: { category: true },
       }),
       prisma.bill.findMany({
@@ -226,7 +263,12 @@ router.get("/summary", async (req: Request, res: Response) => {
 
     // Internal transfers between the user's own accounts are not income nor
     // expense (same rule as the annual panorama).
-    const transactions = filterInternalTransfers(rawTransactions);
+    // Compras de cartão também ficam fora do total individual: elas são a
+    // fatura (Bill) do mês — o valor do cartão segue exposto em
+    // creditCardExpense apenas como informativo.
+    const transactions = filterInternalTransfers(rawTransactions).filter(
+      (tx) => !(tx.type === "EXPENSE" && tx.isCreditCard)
+    );
 
     let totalIncome = 0;
     let totalExpense = 0;
@@ -301,19 +343,14 @@ router.get("/summary", async (req: Request, res: Response) => {
     const billsTotal = bills.reduce((sum, b) => sum + b.amount, 0);
     const balance = totalIncome - totalExpense;
 
-    // Despesas que NÃO são do cartão de crédito (PIX, débito, TED, contas em
-    // conta-corrente) — exclui transferências internas. O card "Cartão" já
-    // traz o total de fatura; este "Outros" separa o resto para o usuário.
-    const cardTxIds = new Set(
-      transactions.filter((t) => t.isCreditCard).map((t) => t.id)
-    );
-    const creditCardExpense = transactions
+    // Cartão do mês (informativo): parcelas das compras cuja FATURA é deste
+    // mês — mesmo critério do /credit-card-total. Não soma no totalExpense,
+    // porque a fatura (Bill) já representa essas compras.
+    const creditCardExpense = filterInternalTransfers(rawTransactions)
       .filter((t) => t.isCreditCard && t.type === "EXPENSE")
-      .reduce((sum, t) => sum + t.amount, 0);
-    const expenseOther =
-      totalExpense - creditCardExpense - billsTotal < 0
-        ? 0
-        : totalExpense - creditCardExpense - billsTotal;
+      .reduce((sum, t) => sum + monthlyInstallmentAmount(t), 0);
+    // "Outros" = lançamentos fora das contas/faturas (PIX, débito, dinheiro).
+    const expenseOther = Math.max(0, totalExpense - billsTotal);
 
     res.json({
       totalIncome,
@@ -548,23 +585,30 @@ router.get("/credit-card-total", async (req: Request, res: Response) => {
 router.get("/comparison", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
+    const monthKey = getMonthKey(req.query.month as string);
     const { start, end } = getMonthRange(req.query.month as string);
 
     const prevStart = new Date(start);
     prevStart.setMonth(prevStart.getMonth() - 1);
     const prevEnd = new Date(start);
+    const prevMonthKey = `${prevStart.getFullYear()}-${String(prevStart.getMonth() + 1).padStart(2, "0")}`;
 
-    // Bill-aware comparison (same rule as /summary): faturas contam 1x e
-    // transações Pluggy não-cartão ficam fora dos totais.
+    // Bill-aware comparison (mesma regra do /summary): a fatura do mês conta
+    // 1x, compras de cartão não somam individualmente e o "mês vigente" segue
+    // /api/transactions (fatura/referenceMonth/data).
     const [currTx, prevTx, currBills, prevBills] = await Promise.all([
-      prisma.transaction.findMany({ where: { userId: user.id, date: { gte: start, lt: end }, billId: null, isHidden: false } }),
-      prisma.transaction.findMany({ where: { userId: user.id, date: { gte: prevStart, lt: prevEnd }, billId: null, isHidden: false } }),
+      prisma.transaction.findMany({ where: monthTransactionsWhere(user.id, monthKey, start, end) }),
+      prisma.transaction.findMany({ where: monthTransactionsWhere(user.id, prevMonthKey, prevStart, prevEnd) }),
       prisma.bill.findMany({ where: { userId: user.id, dueDate: { gte: start, lt: end } } }),
       prisma.bill.findMany({ where: { userId: user.id, dueDate: { gte: prevStart, lt: prevEnd } } }),
     ]);
 
-    const currTxCounted = filterInternalTransfers(currTx).filter(isCountableTx);
-    const prevTxCounted = filterInternalTransfers(prevTx).filter(isCountableTx);
+    const currTxCounted = filterInternalTransfers(currTx)
+      .filter(isCountableTx)
+      .filter((t) => !(t.type === "EXPENSE" && t.isCreditCard));
+    const prevTxCounted = filterInternalTransfers(prevTx)
+      .filter(isCountableTx)
+      .filter((t) => !(t.type === "EXPENSE" && t.isCreditCard));
     const currIncome = currTxCounted.filter((t) => t.type === "INCOME").reduce((s, t) => s + t.amount, 0);
     const currExpense = currTxCounted.filter((t) => t.type === "EXPENSE").reduce((s, t) => s + t.amount, 0)
       + currBills.reduce((s, b) => s + b.amount, 0);
