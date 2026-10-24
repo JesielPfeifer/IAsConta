@@ -244,7 +244,8 @@ router.get("/summary", async (req: Request, res: Response) => {
     const monthKey = getMonthKey(req.query.month as string);
     const { start, end } = getMonthRange(req.query.month as string);
 
-    const [rawTransactions, bills] = await Promise.all([
+    const cardWhere = await cardTransactionWhere(user.id, start, end);
+    const [rawTransactions, bills, cardPurchases] = await Promise.all([
       // Mês vigente (mesma regra de /api/transactions): compras de cartão vêm
       // pela fatura (billForecastMonth), referenceMonth explícito vence e o
       // resto segue o mês civil da data. Transações vinculadas a uma fatura
@@ -259,6 +260,9 @@ router.get("/summary", async (req: Request, res: Response) => {
           dueDate: { gte: start, lt: end },
         },
       }),
+      // Cartão do mês (informativo) — mesmo critério do /credit-card-total,
+      // incluindo as compras já vinculadas à fatura.
+      prisma.transaction.findMany({ where: cardWhere }),
     ]);
 
     // Internal transfers between the user's own accounts are not income nor
@@ -344,11 +348,13 @@ router.get("/summary", async (req: Request, res: Response) => {
     const balance = totalIncome - totalExpense;
 
     // Cartão do mês (informativo): parcelas das compras cuja FATURA é deste
-    // mês — mesmo critério do /credit-card-total. Não soma no totalExpense,
-    // porque a fatura (Bill) já representa essas compras.
-    const creditCardExpense = filterInternalTransfers(rawTransactions)
-      .filter((t) => t.isCreditCard && t.type === "EXPENSE")
-      .reduce((sum, t) => sum + monthlyInstallmentAmount(t), 0);
+    // mês — mesmo critério do /credit-card-total (inclui as compras já
+    // vinculadas à fatura). Não soma no totalExpense: a fatura (Bill) já as
+    // representa.
+    const creditCardExpense = cardPurchases.reduce(
+      (sum, t) => sum + monthlyInstallmentAmount(t),
+      0
+    );
     // "Outros" = lançamentos fora das contas/faturas (PIX, débito, dinheiro).
     const expenseOther = Math.max(0, totalExpense - billsTotal);
 
