@@ -18,6 +18,9 @@ const createBillSchema = z.object({
   categoryId: z.string().uuid().optional().nullable(),
   totalInstallments: z.number().int().min(1).optional(),
   currentInstallment: z.number().int().min(1).optional(),
+  // Cartão da fatura prevista ("Fatura X — prevista MÊS"): permite o sync
+  // remover a prevista quando a fatura oficial do mesmo mês chegar.
+  paymentMethod: z.string().min(1).optional().nullable(),
 });
 
 const updateBillSchema = z.object({
@@ -65,6 +68,7 @@ router.post("/", async (req: Request, res: Response) => {
         isRecurring: data.isRecurring ?? false,
         isShared: data.isShared ?? false,
         isPaid: data.isPaid ?? false,
+        paymentMethod: data.paymentMethod ?? null,
         userId: user.id,
       },
     });

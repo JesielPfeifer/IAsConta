@@ -166,13 +166,20 @@ export default function Bills() {
   async function handleRegisterForecast(f: ForecastCard) {
     const [y, m] = f.month.split('-').map(Number);
     const dueDate = dayjs(`${y}-${String(m).padStart(2, '0')}-10T12:00:00.000Z`).toISOString();
+    // Mesmo formato da fatura oficial ("out. de 2026") + paymentMethod, para o
+    // sync remover a prevista automaticamente quando a oficial chegar.
+    const monthLabel = new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('pt-BR', {
+      month: 'short',
+      year: 'numeric',
+    });
     await api('/api/bills', {
       method: 'POST',
       body: JSON.stringify({
-        name: `Fatura ${f.paymentMethod} — prevista ${f.month}`,
+        name: `Fatura ${f.paymentMethod} — prevista ${monthLabel}`,
         amount: f.total,
         dueDate,
         isPaid: false,
+        paymentMethod: f.paymentMethod,
       }),
     });
     setForecasts((prev: ForecastCard[]) => prev.filter((x) => !(x.paymentMethod === f.paymentMethod && x.month === f.month)));
