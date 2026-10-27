@@ -238,6 +238,16 @@ function addMonthsClamped(date: Date, months: number): Date {
   return new Date(targetYear, normalizedMonth, Math.min(date.getDate(), lastDay));
 }
 
+// Resgate/aplicação de investimento (RDB, poupança, CDB, fundo, tesouro): é
+// dinheiro saindo/voltando da reserva do próprio usuário — não é receita nem
+// despesa. Sem isso um "Resgate RDB" infla as receitas e uma "Aplicação RDB"
+// as despesas.
+export function isSavingsMovement(tx: { description: string }): boolean {
+  return /(?:resgate|aplica[cç][aã]o).*(?:rdb|poupan|invest|cdb|fundo|tesouro)|(?:rdb|poupan|invest|cdb|fundo|tesouro).*(?:resgate|aplica[cç][aã]o)/i.test(
+    tx.description || ""
+  );
+}
+
 router.get("/summary", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
@@ -245,7 +255,7 @@ router.get("/summary", async (req: Request, res: Response) => {
     const { start, end } = getMonthRange(req.query.month as string);
 
     const cardWhere = await cardTransactionWhere(user.id, start, end);
-    const [rawTransactions, bills, cardPurchases] = await Promise.all([
+    const [rawTransactions, bills, cardPurchases, accountBalances, cashMovements] = await Promise.all([
       // Mês vigente (mesma regra de /api/transactions): compras de cartão vêm
       // pela fatura (billForecastMonth), referenceMonth explícito vence e o
       // resto segue o mês civil da data. Transações vinculadas a uma fatura
@@ -263,6 +273,24 @@ router.get("/summary", async (req: Request, res: Response) => {
       // Cartão do mês (informativo) — mesmo critério do /credit-card-total,
       // incluindo as compras já vinculadas à fatura.
       prisma.transaction.findMany({ where: cardWhere }),
+      // Snapshots diários de saldo das contas bancárias (mais novo primeiro):
+      // o primeiro de cada conta = saldo atual; o último antes do início do
+      // mês = saldo de abertura.
+      prisma.accountBalance.findMany({
+        where: { userId: user.id },
+        orderBy: { date: "desc" },
+      }),
+      // Fluxo de caixa do mês (contas correntes): movimentações que não são
+      // compra de cartão — base do fallback de "saldo usado no mês".
+      prisma.transaction.findMany({
+        where: {
+          userId: user.id,
+          date: { gte: start, lt: end },
+          isHidden: false,
+          isCreditCard: false,
+        },
+        select: { type: true, amount: true, description: true },
+      }),
     ]);
 
     // Internal transfers between the user's own accounts are not income nor
@@ -291,6 +319,9 @@ router.get("/summary", async (req: Request, res: Response) => {
       // contar quando lançadas manualmente. Vale para QUALQUER pessoa
       // (HUSBAND/WIFE/COUPLE), não só para lançamentos sem pessoa atribuída.
       if (!isCountableTx(tx)) continue;
+
+      // Resgate/aplicação de investimento não é receita nem despesa.
+      if (isSavingsMovement(tx)) continue;
 
       if (person === "COUPLE") {
         const half = amount / 2;
@@ -345,7 +376,68 @@ router.get("/summary", async (req: Request, res: Response) => {
     }
 
     const billsTotal = bills.reduce((sum, b) => sum + b.amount, 0);
+    // Quebra das contas/faturas: faturas de cartão (vindas do Pluggy, com
+    // pluggyAccountId) × demais contas (financiamentos, prestação habitacional,
+    // recorrentes). Deixa explícito no card que os financiamentos entram no
+    // total — antes só aparecia o valor agregado.
+    const billsCardTotal = bills
+      .filter((b) => !!b.pluggyAccountId)
+      .reduce((sum, b) => sum + b.amount, 0);
+    const billsOtherTotal = Math.round((billsTotal - billsCardTotal) * 100) / 100;
     const balance = totalIncome - totalExpense;
+
+    // ---- Saldo em conta (snapshots diários do sync) ----
+    // Saldo atual = snapshot mais recente de cada conta; abertura = último
+    // snapshot antes do início do mês; fechamento = último antes do fim.
+    const latestBalance = new Map<string, number>();
+    const openingBalance = new Map<string, number>();
+    const closingBalance = new Map<string, number>();
+    for (const snap of accountBalances) {
+      if (!latestBalance.has(snap.pluggyAccountId)) {
+        latestBalance.set(snap.pluggyAccountId, snap.balance);
+      }
+      if (snap.date < start && !openingBalance.has(snap.pluggyAccountId)) {
+        openingBalance.set(snap.pluggyAccountId, snap.balance);
+      }
+      if (snap.date < end && !closingBalance.has(snap.pluggyAccountId)) {
+        closingBalance.set(snap.pluggyAccountId, snap.balance);
+      }
+    }
+    const sumBalances = (m: Map<string, number>): number | null =>
+      m.size ? Math.round([...m.values()].reduce((s, v) => s + v, 0) * 100) / 100 : null;
+    const accountBalance = sumBalances(latestBalance);
+    const balanceOpening = sumBalances(openingBalance);
+    const balanceClosing = sumBalances(closingBalance);
+
+    // Fluxo líquido de caixa do mês (sem compras de cartão e sem
+    // resgate/aplicação de investimento — que são movimento da reserva).
+    const netCashFlow =
+      Math.round(
+        cashMovements
+          .filter((tx) => !isSavingsMovement(tx))
+          .reduce((s, tx) => s + (tx.type === "INCOME" ? tx.amount : -tx.amount), 0) * 100
+      ) / 100;
+
+    // Quanto do saldo acumulado foi usado no mês: medido (abertura −
+    // fechamento) quando há snapshots dos dois lados; senão estimado pelo
+    // fluxo de caixa (mês negativo → a diferença saiu do saldo).
+    const measuredUsed =
+      balanceOpening !== null && balanceClosing !== null
+        ? balanceOpening - balanceClosing
+        : null;
+    const balanceUsed =
+      Math.round(
+        Math.max(0, measuredUsed !== null ? measuredUsed : -netCashFlow) * 100
+      ) / 100;
+    const balanceUsedEstimated = measuredUsed === null;
+
+    // Movimento de reserva no mês (informativo): resgates × aplicações.
+    const savingsIn = cashMovements
+      .filter((tx) => isSavingsMovement(tx) && tx.type === "INCOME")
+      .reduce((s, tx) => s + tx.amount, 0);
+    const savingsOut = cashMovements
+      .filter((tx) => isSavingsMovement(tx) && tx.type === "EXPENSE")
+      .reduce((s, tx) => s + tx.amount, 0);
 
     // Cartão do mês (informativo): parcelas das compras cuja FATURA é deste
     // mês — mesmo critério do /credit-card-total (inclui as compras já
@@ -365,6 +457,16 @@ router.get("/summary", async (req: Request, res: Response) => {
       creditCardExpense,
       balance,
       billsTotal,
+      billsCardTotal,
+      billsOtherTotal,
+      accountBalance,
+      balanceOpening,
+      balanceClosing,
+      balanceUsed,
+      balanceUsedEstimated,
+      netCashFlow,
+      savingsIn: Math.round(savingsIn * 100) / 100,
+      savingsOut: Math.round(savingsOut * 100) / 100,
       byPerson: {
         husband: { income: husbandIncome, expense: husbandExpense },
         wife: { income: wifeIncome, expense: wifeExpense },

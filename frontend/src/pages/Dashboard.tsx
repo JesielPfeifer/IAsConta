@@ -180,6 +180,10 @@ export default function Dashboard() {
   // x lancamentos fora das contas. O cartao entra dentro das faturas (Bill) —
   // nao e somado individualmente.
   const billsTotal = summary?.billsTotal ?? 0;
+  const billsCardTotal = summary?.billsCardTotal ?? billsTotal;
+  const billsOtherTotal = summary?.billsOtherTotal ?? 0;
+  const balanceUsed = summary?.balanceUsed ?? 0;
+  const balanceUsedEstimated = summary?.balanceUsedEstimated ?? false;
   const expenseOthers = Math.max(0, totalExpense - billsTotal);
 
   const pieData = byCategory.map((c) => ({ name: c.category, value: Math.abs(c.total) }));
@@ -228,7 +232,7 @@ export default function Dashboard() {
         <SummaryCard
           label="Despesas"
           value={formatCurrency(totalExpense)}
-          hint={`Contas/faturas ${formatCurrency(billsTotal)}${expenseOthers > 0.005 ? ` · Outros ${formatCurrency(expenseOthers)}` : ''}`}
+          hint={`Faturas ${formatCurrency(billsCardTotal)}${billsOtherTotal > 0.005 ? ` · Financiamentos/contas ${formatCurrency(billsOtherTotal)}` : ''}${expenseOthers > 0.005 ? ` · Outros ${formatCurrency(expenseOthers)}` : ''}`}
           icon={<ArrowDownRight className="h-5 w-5 text-red-400" />}
           color="text-red-400"
           bgIcon="bg-red-500/10"
@@ -285,6 +289,14 @@ export default function Dashboard() {
               <span className="text-sm font-medium text-gray-300">Total em contas</span>
               <span className="text-lg font-bold text-cyan-400 tabular-nums">{formatCurrency(accountTotal)}</span>
             </div>
+            {balanceUsed > 0.005 && (
+              <div className="flex items-center justify-between rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3">
+                <span className="text-sm font-medium text-gray-300">
+                  Pago com saldo em conta no mês{balanceUsedEstimated ? ' (estimado)' : ''}
+                </span>
+                <span className="text-lg font-bold text-amber-400 tabular-nums">{formatCurrency(balanceUsed)}</span>
+              </div>
+            )}
           </div>
         )}
       </SectionCard>

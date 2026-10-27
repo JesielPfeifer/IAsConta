@@ -312,3 +312,18 @@ model FixedIncome {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+// Snapshot diário do saldo das contas bancárias (Pluggy). Permite medir o
+// saldo de abertura/fechamento do mês e quanto do saldo acumulado foi usado
+// para pagar as contas — sem reconstruir pelos lançamentos.
+model AccountBalance {
+  id              String   @id @default(uuid())
+  userId          String
+  pluggyAccountId String
+  balance         Float
+  date            DateTime @db.Date
+  createdAt       DateTime @default(now())
+
+  @@unique([pluggyAccountId, date])
+  @@index([userId, date])
+}
