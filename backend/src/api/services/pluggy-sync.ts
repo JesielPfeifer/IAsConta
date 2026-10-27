@@ -1351,6 +1351,27 @@ async function upsertBill(
     userId,
   };
 
+  // A fatura OFICIAL deste mês chegou: remove a "fatura prevista" registrada
+  // manualmente em Contas a pagar (botão "Registrar como conta a pagar").
+  // Sem isso, prevista + oficial contam a mesma despesa e o dashboard infla.
+  const monthStart = new Date(Date.UTC(due.getUTCFullYear(), due.getUTCMonth(), 1));
+  const monthEnd = new Date(Date.UTC(due.getUTCFullYear(), due.getUTCMonth() + 1, 1));
+  await prisma.bill.deleteMany({
+    where: {
+      userId,
+      source: "MANUAL",
+      name: { contains: "prevista", mode: "insensitive" },
+      dueDate: { gte: monthStart, lt: monthEnd },
+      OR: [
+        { paymentMethod },
+        {
+          paymentMethod: null,
+          name: { startsWith: `Fatura ${cardName} —`, mode: "insensitive" },
+        },
+      ],
+    },
+  });
+
   if (existing) {
     // Fatura editada manualmente: preserva valor/vencimento/status/nome —
     // mas o paymentMethod é metadado do sistema (não editável pelo usuário)
