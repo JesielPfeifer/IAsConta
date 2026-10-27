@@ -455,6 +455,40 @@ export async function syncItem(itemId: string, userId: string): Promise<SyncResu
   const accounts = await client.listAccounts(itemId);
   result.accounts = accounts.length;
 
+  // 2.0 Snapshot diário do saldo das contas bancárias: o dashboard usa para
+  // medir o saldo de abertura/fechamento do mês e quanto do saldo acumulado
+  // foi usado nas contas (o Pluggy entrega o saldo por conta, não por
+  // transação).
+  {
+    const now = new Date();
+    const balanceDate = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+    );
+    for (const account of accounts) {
+      if (!isBankAccount(account)) continue;
+      if (typeof account.balance !== "number") continue;
+      try {
+        await prisma.accountBalance.upsert({
+          where: {
+            pluggyAccountId_date: {
+              pluggyAccountId: account.id,
+              date: balanceDate,
+            },
+          },
+          create: {
+            userId,
+            pluggyAccountId: account.id,
+            balance: account.balance,
+            date: balanceDate,
+          },
+          update: { balance: account.balance },
+        });
+      } catch (err) {
+        result.errors.push(`Saldo conta ${account.id}: ${(err as Error).message}`);
+      }
+    }
+  }
+
   // Persist the item->account association: the DELETE cleanup uses it to
   // remove ONLY the rows of this item (a userId-wide lookup would wipe
   // every connection's data when one connection is removed).

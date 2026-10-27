@@ -7,7 +7,17 @@ interface Summary {
   totalExpense: number;
   balance: number;
   billsTotal: number;
+  billsCardTotal?: number;
+  billsOtherTotal?: number;
   creditCardExpense: number;
+  accountBalance?: number | null;
+  balanceOpening?: number | null;
+  balanceClosing?: number | null;
+  balanceUsed?: number | null;
+  balanceUsedEstimated?: boolean;
+  netCashFlow?: number;
+  savingsIn?: number;
+  savingsOut?: number;
   byPerson: {
     husband: { income: number; expense: number };
     wife: { income: number; expense: number };
