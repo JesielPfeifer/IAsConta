@@ -281,13 +281,17 @@ router.get("/summary", async (req: Request, res: Response) => {
         orderBy: { date: "desc" },
       }),
       // Fluxo de caixa do mês (contas correntes): movimentações que não são
-      // compra de cartão — base do fallback de "saldo usado no mês".
+      // compra de cartão — base do fallback de "saldo usado no mês". Só o que
+      // veio do banco (PLUGGY): lançamentos MANUAL/BOT são anotações e não
+      // movimento de caixa real (contá-los inflaria o fluxo e esconderia o
+      // uso do saldo).
       prisma.transaction.findMany({
         where: {
           userId: user.id,
           date: { gte: start, lt: end },
           isHidden: false,
           isCreditCard: false,
+          source: "PLUGGY",
         },
         select: { type: true, amount: true, description: true },
       }),
