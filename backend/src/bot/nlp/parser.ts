@@ -7,6 +7,11 @@ import { setPendingState, getPendingState, clearPendingState } from './conversat
 
 export type { ParsedTransaction } from './regex.js';
 
+/** Ids afetados pelo fluxo de perguntas: o lote inteiro quando existir. */
+function pendingIds(p: { transactionId: string; transactionIds?: string[] }): string[] {
+  return p.transactionIds && p.transactionIds.length > 0 ? p.transactionIds : [p.transactionId];
+}
+
 export interface ProcessResult {
   success: boolean;
   message: string;
@@ -329,13 +334,17 @@ export async function processMessage(
       if (!pending) break;
 
       if (pending.question === 'fixa') {
+        const isBatch = pendingIds(pending).length > 1;
         if (/^(sim|s|yes|y|claro|verdade|isso|correto)$/i.test(answer)) {
-          await callApi(`/api/transactions/bot/${pending.transactionId}`, { isFixed: true, userId: pending.userId }, 'PUT').catch(() => {});
+          // Vale para todos do lote (modo lista) — não só o primeiro.
+          for (const id of pendingIds(pending)) {
+            await callApi(`/api/transactions/bot/${id}`, { isFixed: true, userId: pending.userId }, 'PUT').catch(() => {});
+          }
           pending.isFixed = true;
-          pending.question = pending.askMonth ? 'mes' : 'parcelas';
+          pending.question = pending.askMonth ? 'mes' : (isBatch ? null : 'parcelas');
           continue;
         } else if (/^(n[ãa]o|nao|n|nop|negativo)$/i.test(answer)) {
-          pending.question = pending.askMonth ? 'mes' : 'parcelas';
+          pending.question = pending.askMonth ? 'mes' : (isBatch ? null : 'parcelas');
           continue;
         } else if (pending.askMonth && parseMonthAnswer(answer)) {
           // Responderam o mês direto: pula a conta fixa e processa o mês abaixo.
@@ -344,10 +353,22 @@ export async function processMessage(
       }
 
       if (pending.question === 'mes') {
+        const isBatch = pendingIds(pending).length > 1;
+        const batchCount = pendingIds(pending).length;
         const monthAnswer = parseMonthAnswer(answer);
         if (monthAnswer?.action === 'set') {
-          await callApi(`/api/transactions/bot/${pending.transactionId}`, { referenceMonth: monthAnswer.ref, userId: pending.userId }, 'PUT').catch(() => {});
+          for (const id of pendingIds(pending)) {
+            await callApi(`/api/transactions/bot/${id}`, { referenceMonth: monthAnswer.ref, userId: pending.userId }, 'PUT').catch(() => {});
+          }
           pending.referenceMonth = monthAnswer.ref;
+          if (isBatch) {
+            // Lote concluído: não pergunta parcelas (lista de contas) e fecha.
+            clearPendingState(senderInfo.senderId);
+            return {
+              success: true,
+              message: `✅ *${batchCount} contas* em *${monthLabel(monthAnswer.ref)}*${pending.isFixed ? ' · conta fixa' : ''}.${monthRecap(monthAnswer.ref)}`,
+            };
+          }
           pending.question = 'parcelas';
           continue;
         }
@@ -572,6 +593,7 @@ export async function processMessage(
   if (lines.length > 1) {
     // Modo lista: processar cada linha
     const results: string[] = [];
+    const createdIds: string[] = [];
     let successCount = 0;
 
     for (const line of lines) {
@@ -584,7 +606,7 @@ export async function processMessage(
       }
 
       try {
-        await callApi('/api/transactions/bot', {
+        const created = await callApi<{ id: string }>('/api/transactions/bot', {
           userId: botUserId,
           type: parsed.transaction_type,
           amount: parsed.amount,
@@ -600,6 +622,7 @@ export async function processMessage(
           totalInstallments: parsed.installments?.total || 1,
           currentInstallment: parsed.installments?.current || 1,
         });
+        if (created?.id) createdIds.push(created.id);
 
         const amountDisplay = parsed.amount != null
           ? `R$${parsed.amount.toFixed(2).replace('.', ',')}`
@@ -613,9 +636,29 @@ export async function processMessage(
     }
 
     if (successCount > 0) {
+      // Modo lista: as perguntas rápidas (conta fixa / mês) valem para o LOTE.
+      // Antes o lote era gravado direto, sem competência nem flag de conta fixa.
+      const quantity = createdIds.length;
+      if (quantity > 0 && senderInfo?.senderId) {
+        setPendingState(senderInfo.senderId, {
+          transactionId: createdIds[0],
+          transactionIds: createdIds,
+          question: 'fixa',
+          userId: botUserId,
+          timestamp: Date.now(),
+          askMonth: true,
+        });
+      }
+      const plural = quantity > 1;
       return {
         success: true,
-        message: `Registrei ${successCount} compra(s):\n${results.join('\n')}`,
+        message:
+          `Registrei ${successCount} compra(s):\n${results.join('\n')}\n\n` +
+          `━━━━━━━━━━━━━━\n` +
+          `🤔 *Perguntas rápidas* (valem para ${plural ? `as ${quantity} compras` : 'o lançamento'}):\n` +
+          `• ${plural ? 'São' : 'É uma'} *conta fixa*? Responda _sim_ ou _nao_\n` +
+          `• É do *mês atual* (${monthLabel(monthKey(0))}) ou do *mês que vem* (${monthLabel(monthKey(1))})? Responda _atual_, _mes que vem_ ou o mês direto\n\n` +
+          `💡 Pode responder tudo junto: _sim, mes que vem_`,
       };
     }
 
