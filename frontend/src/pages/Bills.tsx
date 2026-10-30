@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../api/client';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
+import { PLUGGY_POLL_MS, usePluggyAutoSync } from '../hooks/usePluggyAutoSync';
 import BillForm from '../components/BillForm';
 import ConfirmModal from '../components/ConfirmModal';
 import { Plus, Check, Trash2, Pencil, X, ChevronDown, Calendar, Clock, CheckCircle2, AlertTriangle, type LucideIcon } from 'lucide-react';
@@ -120,16 +121,22 @@ export default function Bills() {
   const currentYear = dayjs().year();
   const years = Array.from({ length: 5 }, (_, i) => currentYear + i);
 
-  async function loadBills() {
-    setLoading(true);
+  async function loadBills(silent = false) {
+    if (!silent) setLoading(true);
     try {
       const data = await api('/api/bills');
       setBills(Array.isArray(data) ? data : []);
     } catch { setBills([]); }
-    finally { setLoading(false); }
+    finally { if (!silent) setLoading(false); }
   }
 
-  useAutoRefresh(loadBills, []);
+  // Polling só com o sync automático (webhook da Pluggy) ativo.
+  const autoSync = usePluggyAutoSync();
+  useAutoRefresh(loadBills, [], {
+    pollMs: PLUGGY_POLL_MS,
+    enabled: autoSync,
+    onPoll: () => loadBills(true),
+  });
 
   // Faturas previstas por mês: enquanto a fatura oficial (Pluggy) não é
   // publicada em Contas a pagar, mostra a projeção dos lançamentos do cartão.

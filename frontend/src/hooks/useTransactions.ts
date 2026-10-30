@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api/client';
 import { useAutoRefresh } from './useAutoRefresh';
+import { PLUGGY_POLL_MS, usePluggyAutoSync } from './usePluggyAutoSync';
 
 export interface Transaction {
   id: string;
@@ -53,18 +54,25 @@ export function useTransactions(filters: Filters = {}) {
     return qs ? `?${qs}` : '';
   }, [filters.month, filters.categoryId, filters.person, filters.type, filters.paymentMethod]);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const refresh = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const data = await api(`/api/transactions${buildQuery()}`);
       const list = Array.isArray(data) ? data : data.transactions || [];
       setTransactions(list.map(normalize));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [buildQuery]);
 
-  useAutoRefresh(refresh, [buildQuery]);
+  // Polling só com o sync automático (webhook da Pluggy) ativo — atualização
+  // silenciosa a cada 90s, apenas com a aba visível.
+  const autoSync = usePluggyAutoSync();
+  useAutoRefresh(refresh, [buildQuery], {
+    pollMs: PLUGGY_POLL_MS,
+    enabled: autoSync,
+    onPoll: () => refresh(true),
+  });
 
   const create = async (txData: Omit<Transaction, 'id' | 'categoryName'>) => {
     await api('/api/transactions', {

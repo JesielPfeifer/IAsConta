@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api/client';
 import { useAutoRefresh } from './useAutoRefresh';
+import { PLUGGY_POLL_MS, usePluggyAutoSync } from './usePluggyAutoSync';
 
 interface Summary {
   totalIncome: number;
@@ -79,8 +80,8 @@ export function useDashboard(month?: string) {
   const [tip, setTip] = useState<TipData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const refresh = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const params = month ? `?month=${encodeURIComponent(month)}` : '';
 
@@ -105,11 +106,19 @@ export function useDashboard(month?: string) {
       setYearAnalysis(yearAnalysisData);
       setTip(tipData);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [month]);
 
-  useAutoRefresh(refresh, [month]);
+  // Polling só quando o sync automático (webhook da Pluggy) está ativo: aí os
+  // dados mudam no servidor sem ação do usuário. Atualização silenciosa (sem
+  // spinner) a cada 90s, e só com a aba visível.
+  const autoSync = usePluggyAutoSync();
+  useAutoRefresh(refresh, [month], {
+    pollMs: PLUGGY_POLL_MS,
+    enabled: autoSync,
+    onPoll: () => refresh(true),
+  });
 
   return { ...data, comparison, yearAnalysis, tip, loading, refresh };
 }

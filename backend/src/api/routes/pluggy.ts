@@ -65,12 +65,24 @@ router.get("/status", async (req: Request, res: Response) => {
     } catch {
       autoSync = null; // Pluggy indisponível não pode derrubar o status
     }
+    // Última sincronização por banco: o front usa para mostrar "atualizado às
+    // HH:MM" e para o polling (só faz sentido quando o sync automático está
+    // ativo — sem webhook, nada muda entre as sincronizações manuais).
+    const connections = await prisma.bankConnection.findMany({
+      where: { userId: user.id, itemId: { not: null } },
+      select: { bankLabel: true, bankName: true, lastSyncAt: true },
+      orderBy: { lastSyncAt: "desc" },
+    });
     res.json({
       configured: hasUserCreds || globalConfigured,
       userConfigured: hasUserCreds,
       globalConfigured,
       webhookUrl: pluggyWebhookUrl(),
       autoSync,
+      connections: connections.map((c) => ({
+        bank: c.bankLabel || c.bankName || "Banco",
+        lastSyncAt: c.lastSyncAt,
+      })),
     });
   } catch (err) {
     console.error("[pluggy] status:", err);

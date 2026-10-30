@@ -6,6 +6,7 @@ import { PieChart as RePie, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGri
 import dayjs from 'dayjs';
 import { api } from '../api/client';
 import { useOnboarding } from '../hooks/useOnboarding';
+import { usePluggyLastSync } from '../hooks/usePluggyAutoSync';
 
 const COLORS = ['#10b981', '#14b8a6', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#f97316', '#ef4444', '#84cc16', '#a855f7', '#14b8a6', '#e11d48'];
 
@@ -179,6 +180,7 @@ export default function Dashboard() {
   // Composicao da despesa no mes vigente: contas/faturas com vencimento no mes
   // x lancamentos fora das contas. O cartao entra dentro das faturas (Bill) —
   // nao e somado individualmente.
+  const lastSync = usePluggyLastSync();
   const billsTotal = summary?.billsTotal ?? 0;
   const billsCardTotal = summary?.billsCardTotal ?? billsTotal;
   const billsOtherTotal = summary?.billsOtherTotal ?? 0;
@@ -202,6 +204,11 @@ export default function Dashboard() {
             <p className="text-sm text-gray-400">Acompanhe suas finanças em tempo real</p>
           </div>
           <div className="flex items-center gap-2">
+            {lastSync && (
+              <span className="text-xs text-gray-500 tabular-nums" title="Última sincronização dos bancos (Open Finance)">
+                Atualizado {dayjs(lastSync).format('DD/MM [às] HH:mm')}
+              </span>
+            )}
             <Calendar className="h-5 w-5 text-emerald-400" />
             <input
               type="month"
