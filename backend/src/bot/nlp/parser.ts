@@ -639,7 +639,10 @@ export async function processMessage(
       // Modo lista: as perguntas rápidas (conta fixa / mês) valem para o LOTE.
       // Antes o lote era gravado direto, sem competência nem flag de conta fixa.
       const quantity = createdIds.length;
-      if (quantity > 0 && senderInfo?.senderId) {
+      // Só pergunta se existe sender para receber a resposta (sem senderId o
+      // estado pendente não é criado e a pergunta ficaria sem resposta).
+      const canAsk = quantity > 0 && Boolean(senderInfo?.senderId);
+      if (canAsk) {
         setPendingState(senderInfo.senderId, {
           transactionId: createdIds[0],
           transactionIds: createdIds,
@@ -650,15 +653,16 @@ export async function processMessage(
         });
       }
       const plural = quantity > 1;
-      return {
-        success: true,
-        message:
-          `Registrei ${successCount} compra(s):\n${results.join('\n')}\n\n` +
-          `━━━━━━━━━━━━━━\n` +
+      const questions = canAsk
+        ? `\n\n━━━━━━━━━━━━━━\n` +
           `🤔 *Perguntas rápidas* (valem para ${plural ? `as ${quantity} compras` : 'o lançamento'}):\n` +
           `• ${plural ? 'São' : 'É uma'} *conta fixa*? Responda _sim_ ou _nao_\n` +
           `• É do *mês atual* (${monthLabel(monthKey(0))}) ou do *mês que vem* (${monthLabel(monthKey(1))})? Responda _atual_, _mes que vem_ ou o mês direto\n\n` +
-          `💡 Pode responder tudo junto: _sim, mes que vem_`,
+          `💡 Pode responder tudo junto: _sim, mes que vem_`
+        : '';
+      return {
+        success: true,
+        message: `Registrei ${successCount} compra(s):\n${results.join('\n')}${questions}`,
       };
     }
 
