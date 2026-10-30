@@ -3,6 +3,9 @@
 
 interface PendingState {
   transactionId: string;
+  // Lote: quando a mensagem trouxe VÁRIOS lançamentos de uma vez (modo lista),
+  // as respostas do fluxo (conta fixa / mês) valem para todos os ids.
+  transactionIds?: string[];
   question: 'fixa' | 'mes' | 'parcelas' | null;
   userId: string;
   timestamp: number;
