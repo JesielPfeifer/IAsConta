@@ -27,11 +27,17 @@ export function useAutoRefresh(
   options: AutoRefreshOptions = {}
 ) {
   const saved = useRef(callback);
-  saved.current = callback;
   const polled = useRef(options.onPoll ?? callback);
-  polled.current = options.onPoll ?? callback;
   const { pollMs, enabled = false } = options;
 
+  // Refs sincronizadas em efeito, nunca durante o render: React pode descartar
+  // um render e o valor vazaria para o timer/handler.
+  useEffect(() => {
+    saved.current = callback;
+    polled.current = options.onPoll ?? callback;
+  });
+
+  // Busca inicial + recarga em qualquer mudança global de dados.
   useEffect(() => {
     // fetch inicial
     saved.current();
@@ -40,19 +46,20 @@ export function useAutoRefresh(
       saved.current();
     };
     window.addEventListener(DATA_CHANGED_EVENT, handler);
-
-    let timer: number | undefined;
-    if (enabled && pollMs && pollMs > 0) {
-      timer = window.setInterval(() => {
-        // Aba em segundo plano não busca — economiza rede e CPU do servidor.
-        if (document.visibilityState === 'visible') polled.current();
-      }, pollMs);
-    }
-
-    return () => {
-      window.removeEventListener(DATA_CHANGED_EVENT, handler);
-      if (timer) window.clearInterval(timer);
-    };
+    return () => window.removeEventListener(DATA_CHANGED_EVENT, handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, enabled, pollMs]);
+  }, deps);
+
+  // Polling em efeito separado: ligar/desligar o auto-sync só inicia/para o
+  // timer, sem refazer a busca inicial. (`enabled` começa false e vira true
+  // quando o /status carrega — juntar os efeitos repetiria todas as requests
+  // da tela nesse momento.)
+  useEffect(() => {
+    if (!enabled || !pollMs || pollMs <= 0) return;
+    const timer = window.setInterval(() => {
+      // Aba em segundo plano não busca — economiza rede e CPU do servidor.
+      if (document.visibilityState === 'visible') polled.current();
+    }, pollMs);
+    return () => window.clearInterval(timer);
+  }, [enabled, pollMs]);
 }
