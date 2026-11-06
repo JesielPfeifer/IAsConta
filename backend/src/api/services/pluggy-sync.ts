@@ -1041,10 +1041,15 @@ async function syncCreditCard(
       ? await findOrCreateCategory(categoryName, userId)
       : null;
 
-    // Dia de fechamento do cartão: vem do balanceCloseDate do Pluggy
-    // (ex.: 25 na CAIXA, 26 no Nubank). Fallback 26.
-    const closingDay = account.creditData?.balanceCloseDate
-      ? new Date(account.creditData.balanceCloseDate).getUTCDate()
+    // Dia de fechamento do cartão. O Pluggy NÃO informa o ciclo nem o
+    // fechamento: nos dois cartões atuais `creditData.balanceCloseDate` vem
+    // nulo e só `balanceDueDate` (vencimento) está preenchido — que nesses
+    // bancos cai no mesmo dia do fechamento (CAIXA 25, Nubank 26). Por isso a
+    // ordem: fechamento → vencimento → 26.
+    const closingSource =
+      account.creditData?.balanceCloseDate || account.creditData?.balanceDueDate;
+    const closingDay = closingSource
+      ? new Date(closingSource).getUTCDate()
       : 26;
 
     const data = {
