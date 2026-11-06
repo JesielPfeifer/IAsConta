@@ -166,6 +166,12 @@ export default function Dashboard() {
     (t) => t.type === 'EXPENSE' && t.isFixed && !t.billId
   );
 
+  // Hooks SEMPRE antes de qualquer return condicional: quando este hook estava
+  // depois do `if (loading)`, o primeiro render (com loading) executava menos
+  // hooks que o seguinte e o React quebrava com o erro #310 ("Rendered more
+  // hooks than during the previous render").
+  const lastSync = usePluggyLastSync();
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -180,7 +186,6 @@ export default function Dashboard() {
   // Composicao da despesa no mes vigente: contas/faturas com vencimento no mes
   // x lancamentos fora das contas. O cartao entra dentro das faturas (Bill) —
   // nao e somado individualmente.
-  const lastSync = usePluggyLastSync();
   const billsTotal = summary?.billsTotal ?? 0;
   const billsCardTotal = summary?.billsCardTotal ?? billsTotal;
   const billsOtherTotal = summary?.billsOtherTotal ?? 0;
