@@ -165,12 +165,12 @@ export function shiftMonthKey(
  * fechamento joga compras do meio do mês na fatura errada. Enquanto o banco
  * não publica o fechamento via Open Finance, o dia fica mapeado aqui:
  *   CAIXA  → fecha dia 14 (vence dia 25)
- *   NUBANK → fecha dia 16 (vence dia 26)
- * Fallback: 16.
+ *   NUBANK → fecha dia 19 (vence dia 26)
+ * Fallback: 19.
  */
 const CARD_CLOSING_DAY: Record<string, number> = {
   CAIXA: 14,
-  NUBANK: 16,
+  NUBANK: 19,
 };
 
 export function cardClosingDay(
@@ -185,14 +185,14 @@ export function cardClosingDay(
   for (const name of Object.keys(CARD_CLOSING_DAY)) {
     if (key.includes(name)) return CARD_CLOSING_DAY[name];
   }
-  return 16;
+  return 19;
 }
 
 /**
  * Deriva o mês da fatura quando o Pluggy NÃO envia `billForecastDate`.
  *
- * Regra do ciclo: compra até o dia de fechamento cai na fatura que fecha no
- * mês; depois do fechamento, na do mês seguinte. Sem isso a compra fica com
+ * Regra do ciclo: compra ANTES do dia de fechamento cai na fatura que fecha
+ * no mês; no dia do fechamento ou depois, na do mês seguinte. Sem isso a compra fica com
  * `billForecastMonth` nulo, não entra em nenhuma previsão de fatura e o total
  * do mês no dashboard não fecha com a fatura do banco.
  */
@@ -203,9 +203,9 @@ export function inferBillForecastMonth(
   if (!dateISO) return null;
   const d = new Date(dateISO);
   if (Number.isNaN(d.getTime())) return null;
-  const close = closingDay >= 1 && closingDay <= 31 ? closingDay : 16;
+  const close = closingDay >= 1 && closingDay <= 31 ? closingDay : 19;
   const base =
-    d.getUTCDate() > close
+    d.getUTCDate() >= close
       ? new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))
       : new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
   return `${base.getUTCFullYear()}-${String(base.getUTCMonth() + 1).padStart(2, "0")}`;
