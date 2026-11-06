@@ -158,6 +158,29 @@ export function shiftMonthKey(
 }
 
 /**
+ * Deriva o mês da fatura quando o Pluggy NÃO envia `billForecastDate`.
+ *
+ * Regra do ciclo: compra até o dia de fechamento cai na fatura do próprio mês;
+ * depois do fechamento, na do mês seguinte. Sem isso a compra fica com
+ * `billForecastMonth` nulo, não entra em nenhuma previsão de fatura e o total
+ * do mês no dashboard não fecha com a fatura do banco.
+ */
+export function inferBillForecastMonth(
+  dateISO: string | null | undefined,
+  closingDay: number
+): string | null {
+  if (!dateISO) return null;
+  const d = new Date(dateISO);
+  if (Number.isNaN(d.getTime())) return null;
+  const close = closingDay >= 1 && closingDay <= 31 ? closingDay : 26;
+  const base =
+    d.getUTCDate() > close
+      ? new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))
+      : new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+  return `${base.getUTCFullYear()}-${String(base.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/**
  * Detects the constant offset between Pluggy's per-transaction
  * billForecastDate tag and the REAL invoice month of one card account.
  *
@@ -1018,6 +1041,12 @@ async function syncCreditCard(
       ? await findOrCreateCategory(categoryName, userId)
       : null;
 
+    // Dia de fechamento do cartão: vem do balanceCloseDate do Pluggy
+    // (ex.: 25 na CAIXA, 26 no Nubank). Fallback 26.
+    const closingDay = account.creditData?.balanceCloseDate
+      ? new Date(account.creditData.balanceCloseDate).getUTCDate()
+      : 26;
+
     const data = {
       amount,
       totalAmount,
@@ -1036,7 +1065,9 @@ async function syncCreditCard(
       // in (billForecastDate "YYYY-MM") — use it directly instead of inferring
       // a closing cycle, normalized by the institution's offset when its tags
       // point to the month before the real invoice. Null when absent (legacy).
-      billForecastMonth: shiftMonthKey(meta.billForecastDate, forecastOffset),
+      billForecastMonth:
+        shiftMonthKey(meta.billForecastDate, forecastOffset) ??
+        inferBillForecastMonth(tx.date, closingDay),
       pluggyAccountId: account.id,
       totalInstallments,
       currentInstallment,
