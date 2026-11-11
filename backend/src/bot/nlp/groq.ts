@@ -1,5 +1,5 @@
 import Groq from 'groq-sdk';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../../lib/prisma.js';
 
 const PARSING_PROMPT = `Voce e um assistente financeiro que extrai informacoes de mensagens em portugues do Brasil.
 
@@ -91,7 +91,6 @@ function normalizeParsed(raw: any): ParsedTransaction {
 }
 
 export async function parseWithGroq(text: string, userId?: string): Promise<ParsedTransaction | null> {
-  const prisma = new PrismaClient();
   let apiKey = process.env.GROQ_API_KEY || '';
   
   if (userId) {
@@ -146,7 +145,6 @@ export async function chatWithGroq(question: string, context: string, userId?: s
   let apiKey = process.env.GROQ_API_KEY || '';
 
   if (userId) {
-    const prisma = new PrismaClient();
     const settings = await prisma.userSettings.findUnique({ where: { userId } });
     if (settings?.groqApiKey) apiKey = settings.groqApiKey;
   }

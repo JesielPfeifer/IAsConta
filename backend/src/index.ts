@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import multer from "multer";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "./lib/prisma.js";
 import { rateLimitMiddleware, corsOptions } from "./api/middleware/security.js";
 import authRoutes from "./api/routes/auth.js";
 import transactionRoutes, { botRouter } from "./api/routes/transactions.js";
@@ -155,10 +155,12 @@ app.post("/webhook/evolution", async (req, res) => {
 
     const text = rawText.replace(/@contas/gi, "").trim();
 
-    // Identify user by instance name from webhook
-    const prisma = new PrismaClient();
-    let botUserId = '';
-    
+    // Identify user by instance name from webhook.
+    // Usa o client Prisma compartilhado: criar um por requisição esgotava o
+    // pool (limite 5) quando os webhooks chegavam em rajada junto com o sync
+    // da Pluggy (PrismaClientInitializationError: pool timeout).
+    let botUserId = "";
+
     try {
       const waUser = await prisma.whatsAppUser.findFirst({
         where: { instanceName, isActive: true },
@@ -166,13 +168,15 @@ app.post("/webhook/evolution", async (req, res) => {
       if (waUser) {
         botUserId = waUser.userId;
       }
-      
+
       if (!botUserId) {
         res.sendStatus(200);
         return;
       }
-    } finally {
-      await prisma.$disconnect();
+    } catch (err) {
+      console.error("[webhook] erro ao identificar usuário:", err);
+      res.sendStatus(500);
+      return;
     }
     const { getSetting } = await import('./api/services/settings.js');
     const allowedGroup = await getSetting(botUserId, 'whatsappGroupId', process.env.WHATSAPP_GROUP_ID || '');

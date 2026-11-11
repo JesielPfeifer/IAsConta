@@ -158,6 +158,60 @@ export function shiftMonthKey(
 }
 
 /**
+ * Dia de fechamento por cartão.
+ *
+ * O Pluggy não expõe o fechamento (`creditData.balanceCloseDate` vem nulo nos
+ * dois cartões) e `balanceDueDate` é o VENCIMENTO — usar o vencimento como
+ * fechamento joga compras do meio do mês na fatura errada. Enquanto o banco
+ * não publica o fechamento via Open Finance, o dia fica mapeado aqui:
+ *   CAIXA  → fecha dia 14 (vence dia 25)
+ *   NUBANK → fecha dia 19 (vence dia 26)
+ * Fallback: 19.
+ */
+const CARD_CLOSING_DAY: Record<string, number> = {
+  CAIXA: 14,
+  NUBANK: 19,
+};
+
+export function cardClosingDay(
+  cardName: string | null | undefined,
+  creditData?: { balanceCloseDate?: string | null } | null
+): number {
+  if (creditData?.balanceCloseDate) {
+    const d = new Date(creditData.balanceCloseDate);
+    if (!Number.isNaN(d.getTime())) return d.getUTCDate();
+  }
+  const key = (cardName || "").toUpperCase().trim();
+  for (const name of Object.keys(CARD_CLOSING_DAY)) {
+    if (key.includes(name)) return CARD_CLOSING_DAY[name];
+  }
+  return 19;
+}
+
+/**
+ * Deriva o mês da fatura quando o Pluggy NÃO envia `billForecastDate`.
+ *
+ * Regra do ciclo: compra ANTES do dia de fechamento cai na fatura que fecha
+ * no mês; no dia do fechamento ou depois, na do mês seguinte. Sem isso a compra fica com
+ * `billForecastMonth` nulo, não entra em nenhuma previsão de fatura e o total
+ * do mês no dashboard não fecha com a fatura do banco.
+ */
+export function inferBillForecastMonth(
+  dateISO: string | null | undefined,
+  closingDay: number
+): string | null {
+  if (!dateISO) return null;
+  const d = new Date(dateISO);
+  if (Number.isNaN(d.getTime())) return null;
+  const close = closingDay >= 1 && closingDay <= 31 ? closingDay : 19;
+  const base =
+    d.getUTCDate() >= close
+      ? new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))
+      : new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+  return `${base.getUTCFullYear()}-${String(base.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/**
  * Detects the constant offset between Pluggy's per-transaction
  * billForecastDate tag and the REAL invoice month of one card account.
  *
@@ -1018,6 +1072,13 @@ async function syncCreditCard(
       ? await findOrCreateCategory(categoryName, userId)
       : null;
 
+    // Dia de fechamento do cartão. O Pluggy NÃO informa o fechamento
+    // (creditData.balanceCloseDate vem nulo nos dois cartões) e o
+    // balanceDueDate é o VENCIMENTO — que não é o fechamento: na CAIXA a
+    // fatura fecha dia 14 e vence dia 25; no Nubank fecha dia 16 e vence dia
+    // 26. Por isso o fechamento vem do mapa por cartão (fallback 16).
+    const closingDay = cardClosingDay(paymentMethod, account.creditData);
+
     const data = {
       amount,
       totalAmount,
@@ -1036,7 +1097,9 @@ async function syncCreditCard(
       // in (billForecastDate "YYYY-MM") — use it directly instead of inferring
       // a closing cycle, normalized by the institution's offset when its tags
       // point to the month before the real invoice. Null when absent (legacy).
-      billForecastMonth: shiftMonthKey(meta.billForecastDate, forecastOffset),
+      billForecastMonth:
+        shiftMonthKey(meta.billForecastDate, forecastOffset) ??
+        inferBillForecastMonth(tx.date, closingDay),
       pluggyAccountId: account.id,
       totalInstallments,
       currentInstallment,
