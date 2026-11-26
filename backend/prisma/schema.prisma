@@ -77,6 +77,11 @@ model Transaction {
   // Não é receita nem despesa — apenas movimento de dinheiro entre contas
   // próprias. Excluída dos totais de despesa/receita do dashboard.
   isInternalTransfer Boolean         @default(false)
+  // Decisão explícita do usuário sobre entrar ou não nos totais do dashboard
+  // (chip "Nos totais" na tela de Transações). null = segue a regra automática
+  // de isCountableTx (Pluggy que não é cartão não conta); true/false = o que
+  // o usuário validou ou desmarcou.
+  countsInTotals     Boolean?
   // TED de salário recebida com valor diferente da Rendas Fixas configurada:
   // o usuário decide se atualiza o valor do mês vigente. Enquanto não decide,
   // a transação fica marcada para exibir um prompt na UI.

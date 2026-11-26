@@ -5,7 +5,7 @@ import FileImport from '../components/FileImport';
 import ConfirmModal from '../components/ConfirmModal';
 import { api, DATA_CHANGED_EVENT } from '../api/client';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
-import { Plus, Upload, Pencil, Trash2, Search, Check, X, ChevronDown, Calendar, Filter, Users, CreditCard, ArrowUpDown, TrendingUp, HelpCircle, type LucideIcon } from 'lucide-react';
+import { Plus, Upload, Pencil, Trash2, Search, Check, X, ChevronDown, Calendar, Filter, Users, CreditCard, ArrowUpDown, TrendingUp, HelpCircle, CheckCircle2, MinusCircle, type LucideIcon } from 'lucide-react';
 import dayjs from 'dayjs';
 import { useOnboarding } from '../hooks/useOnboarding';
 
@@ -80,7 +80,7 @@ export default function Transactions() {
     paymentMethod: paymentMethod || undefined,
   }), [month, categoryId, person, type, paymentMethod]);
 
-  const { transactions, loading, create, update, remove, refresh } = useTransactions(filters);
+  const { transactions, loading, create, update, remove, refresh, setCounted } = useTransactions(filters);
   const [showForm, setShowForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [editing, setEditing] = useState<Transaction | null>(null);
@@ -223,6 +223,15 @@ export default function Transactions() {
     if (!groupFilter) return filtered;
     return filtered.filter((t) => groupTxs(groupFilter).some((g) => g.id === t.id));
   }, [filtered, groupFilter]);
+
+  // Alterna a contabilização da linha nos totais do dashboard.
+  async function handleToggleCounted(tx: Transaction) {
+    try {
+      await setCounted(tx.id, !(tx.isCounted ?? true));
+    } catch {
+      // Falha de rede: o auto-refresh seguinte reconcilia a tela.
+    }
+  }
 
   function handleEdit(tx: Transaction) {
     setEditing(tx);
@@ -531,6 +540,15 @@ export default function Transactions() {
                                 <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium border ${t.type === 'INCOME' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
                                   {typeLabel[t.type] || t.type}
                                 </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleCounted(t)}
+                                  title={`${t.isCounted ? 'Somando nos totais' : 'Fora dos totais'}${t.countingReason ? ` · ${t.countingReason}` : ''} — clique para alternar`}
+                                  className={`ml-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border transition-colors ${t.isCounted ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20' : 'bg-gray-500/10 text-gray-400 border-white/10 hover:bg-white/10'}`}
+                                >
+                                  {t.isCounted ? <CheckCircle2 className="w-3 h-3" /> : <MinusCircle className="w-3 h-3" />}
+                                  {t.isCounted ? 'Nos totais' : 'Fora dos totais'}
+                                </button>
                               </td>
                               <td className="px-3 py-2 text-right font-medium text-red-400">
                                 {editingAmount?.id === t.id ? (
@@ -650,6 +668,15 @@ export default function Transactions() {
                                 <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium border ${t.type === 'INCOME' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
                                   {typeLabel[t.type] || t.type}
                                 </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleCounted(t)}
+                                  title={`${t.isCounted ? 'Somando nos totais' : 'Fora dos totais'}${t.countingReason ? ` · ${t.countingReason}` : ''} — clique para alternar`}
+                                  className={`ml-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border transition-colors ${t.isCounted ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20' : 'bg-gray-500/10 text-gray-400 border-white/10 hover:bg-white/10'}`}
+                                >
+                                  {t.isCounted ? <CheckCircle2 className="w-3 h-3" /> : <MinusCircle className="w-3 h-3" />}
+                                  {t.isCounted ? 'Nos totais' : 'Fora dos totais'}
+                                </button>
                               </td>
                               <td className="px-3 py-2 text-right font-medium text-red-400">
                                 {editingAmount?.id === t.id ? (
@@ -840,6 +867,15 @@ export default function Transactions() {
                                 <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium border ${t.type === 'INCOME' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
                                   {typeLabel[t.type] || t.type}
                                 </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleCounted(t)}
+                                  title={`${t.isCounted ? 'Somando nos totais' : 'Fora dos totais'}${t.countingReason ? ` · ${t.countingReason}` : ''} — clique para alternar`}
+                                  className={`ml-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border transition-colors ${t.isCounted ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20' : 'bg-gray-500/10 text-gray-400 border-white/10 hover:bg-white/10'}`}
+                                >
+                                  {t.isCounted ? <CheckCircle2 className="w-3 h-3" /> : <MinusCircle className="w-3 h-3" />}
+                                  {t.isCounted ? 'Nos totais' : 'Fora dos totais'}
+                                </button>
                               </td>
                               <td className={`px-3 py-2 text-right font-medium ${t.type === 'INCOME' ? 'text-emerald-400' : 'text-red-400'}`}>
                                 {editingAmount?.id === t.id ? (

@@ -141,8 +141,17 @@ function monthTransactionsWhere(
  * /by-category, /by-payment, /year-analysis e /percentage coerentes entre si.
  */
 export function isCountableTx<
-  T extends { source?: string | null; isCreditCard?: boolean | null }
+  T extends {
+    source?: string | null;
+    isCreditCard?: boolean | null;
+    countsInTotals?: boolean | null;
+  }
 >(tx: T): boolean {
+  // A decisão explícita do usuário (chip "Nos totais" na tela de Transações)
+  // vence a regra automática — ele valida a entrada/saída na mão.
+  if (tx.countsInTotals === true || tx.countsInTotals === false) {
+    return tx.countsInTotals;
+  }
   return tx.source !== "PLUGGY" || !!tx.isCreditCard;
 }
 
