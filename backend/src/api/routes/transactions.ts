@@ -33,6 +33,9 @@ const createTransactionSchema = z.object({
 });
 
 const updateTransactionSchema = z.object({
+  // Decisão explícita do usuário: entrar ou não nos totais do dashboard.
+  // null = volta para a regra automática.
+  countsInTotals: z.boolean().nullable().optional(),
   referenceMonth: z.string().regex(/^\d{4}-\d{2}$/).nullable().optional(),
   amount: z.number().optional(),
   type: z.enum(["EXPENSE", "INCOME"]).optional(),
@@ -160,6 +163,34 @@ router.get("/card-cycle", async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Explica se a transação entra ou não nos totais do dashboard — mesma regra do
+ * isCountableTx, com o override do usuário e o motivo legível exibido na tela.
+ */
+function countingInfo(tx: {
+  source?: string | null;
+  isCreditCard?: boolean | null;
+  countsInTotals?: boolean | null;
+  isInternalTransfer?: boolean | null;
+}): { isCounted: boolean; countingReason: string } {
+  if (tx.countsInTotals === true) {
+    return { isCounted: true, countingReason: "Validado por você" };
+  }
+  if (tx.countsInTotals === false) {
+    return { isCounted: false, countingReason: "Desmarcado por você" };
+  }
+  if (tx.isInternalTransfer) {
+    return { isCounted: false, countingReason: "Transferência entre contas" };
+  }
+  if (tx.source === "PLUGGY" && !tx.isCreditCard) {
+    return { isCounted: false, countingReason: "Importado do banco (Pluggy)" };
+  }
+  if (tx.source === "BOT") {
+    return { isCounted: true, countingReason: "Lançado pelo bot" };
+  }
+  return { isCounted: true, countingReason: "Lançamento manual" };
+}
+
 router.get("/", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
@@ -248,7 +279,48 @@ router.get("/", async (req: Request, res: Response) => {
       orderBy: { date: "desc" },
     });
 
-    res.json(transactions);
+    res.json(transactions.map((tx) => ({ ...tx, ...countingInfo(tx) })));
+  } catch (err) {
+    logger.error(err);
+    res.status(500).json({ error: "Erro interno" });
+  }
+});
+
+
+// Liga/desliga a transação nos totais (chip "Nos totais" da tela): body
+// { counts: true | false | null } — null volta para a regra automática.
+router.post("/:id/counting", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    const { id } = req.params;
+    const parsed = z.object({ counts: z.boolean().nullable() }).safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Body inválido: informe counts (true, false ou null)." });
+      return;
+    }
+    const body = parsed.data;
+
+    const existing = await prisma.transaction.findFirst({
+      where: { id: id as string, userId: user.id },
+    });
+    if (!existing) {
+      res.status(404).json({ error: "Transação não encontrada" });
+      return;
+    }
+
+    const updated = await prisma.transaction.update({
+      where: { id: id as string },
+      // Vale só para a linha escolhida: cada parcela é um lançamento próprio e
+      // pode ter tratamento diferente nos totais.
+      data: {
+        countsInTotals: body.counts,
+        // Decisão do usuário sobre linha importada = edição manual: o sync
+        // não sobrescreve mais esta linha no re-sincronismo.
+        ...(existing.source === "PLUGGY" ? { manuallyEdited: true } : {}),
+      },
+    });
+
+    res.json({ ...updated, ...countingInfo(updated) });
   } catch (err) {
     logger.error(err);
     res.status(500).json({ error: "Erro interno" });

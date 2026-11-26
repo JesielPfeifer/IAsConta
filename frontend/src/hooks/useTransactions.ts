@@ -22,6 +22,11 @@ export interface Transaction {
   isCreditCard?: boolean;
   billId?: string | null;
   referenceMonth?: string | null;
+  // Decisão explícita do usuário sobre entrar nos totais (null = automático).
+  countsInTotals?: boolean | null;
+  // Resolvido pela API: a transação está somando nos totais do dashboard.
+  isCounted?: boolean;
+  countingReason?: string;
 }
 
 interface Filters {
@@ -95,5 +100,14 @@ export function useTransactions(filters: Filters = {}) {
     await refresh();
   };
 
-  return { transactions, loading, create, update, remove, refresh };
+  // Liga/desliga a transação nos totais do dashboard (null = regra automática).
+  const setCounted = async (id: string, counts: boolean | null) => {
+    await api(`/api/transactions/${id}/counting`, {
+      method: 'POST',
+      body: JSON.stringify({ counts }),
+    });
+    await refresh(true);
+  };
+
+  return { transactions, loading, create, update, remove, refresh, setCounted };
 }
