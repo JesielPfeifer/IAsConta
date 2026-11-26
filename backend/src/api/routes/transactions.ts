@@ -185,6 +185,9 @@ function countingInfo(tx: {
   if (tx.source === "PLUGGY" && !tx.isCreditCard) {
     return { isCounted: false, countingReason: "Importado do banco (Pluggy)" };
   }
+  if (tx.source === "BOT") {
+    return { isCounted: true, countingReason: "Lançado pelo bot" };
+  }
   return { isCounted: true, countingReason: "Lançamento manual" };
 }
 
@@ -290,7 +293,12 @@ router.post("/:id/counting", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
     const { id } = req.params;
-    const body = z.object({ counts: z.boolean().nullable() }).parse(req.body);
+    const parsed = z.object({ counts: z.boolean().nullable() }).safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Body inválido: informe counts (true, false ou null)." });
+      return;
+    }
+    const body = parsed.data;
 
     const existing = await prisma.transaction.findFirst({
       where: { id: id as string, userId: user.id },
@@ -302,6 +310,8 @@ router.post("/:id/counting", async (req: Request, res: Response) => {
 
     const updated = await prisma.transaction.update({
       where: { id: id as string },
+      // Vale só para a linha escolhida: cada parcela é um lançamento próprio e
+      // pode ter tratamento diferente nos totais.
       data: {
         countsInTotals: body.counts,
         // Decisão do usuário sobre linha importada = edição manual: o sync
